@@ -35,19 +35,18 @@ class ApiClient {
     // Request interceptor
     this.client.interceptors.request.use(
       (config: InternalAxiosRequestConfig) => {
-        let token =
-          useAuthStore.getState().token || localStorage.getItem("auth_token");
-        if (typeof token === "string") {
+        let token = useAuthStore.getState().token || localStorage.getItem('auth_token');
+        if (typeof token === 'string') {
           token = token.trim();
         }
-
+        
         if (token && token !== "undefined" && token !== "null") {
           // Robustly ensure 'Bearer ' prefix matches expected backend format exactly
           let authValue = token;
-          if (authValue.toLowerCase().startsWith("bearer ")) {
+          if (authValue.toLowerCase().startsWith('bearer ')) {
             authValue = authValue.substring(7).trim();
           }
-          config.headers["Authorization"] = `Bearer ${authValue}`;
+          config.headers['Authorization'] = `Bearer ${authValue}`;
         }
 
         return config;
@@ -68,9 +67,11 @@ class ApiClient {
           : "unknown";
 
         // Handle different error types
-        if (error.response?.status === 401 || error.response?.status === 403) {
-          toast.error("Unauthorized - Please login again");
+        if (error.response?.status === 401) {
+          toast.error("Session expired - Please login again");
           useAuthStore.getState().logout();
+        } else if (error.response?.status === 403) {
+          toast.error("Forbidden - You do not have permission for this action");
         }
 
         return Promise.reject(error);
