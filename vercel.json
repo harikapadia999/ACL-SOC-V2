@@ -1,0 +1,39 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/dashboard/metrics,",
+      "destination": "https://ai-soc.onrender.com/api/v1/dashboard/metrics,"
+    },
+    {
+      "source": "/api/alerts/alerts",
+      "destination": "https://ai-soc.onrender.com/api/v1/alerts/alerts"
+    },
+    {
+      "source": "/api/:path*",
+      "destination": "https://ai-soc.onrender.com/:path*"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        {
+          "key": "Access-Control-Allow-Origin",
+          "value": "*"
+        },
+        {
+          "key": "Access-Control-Allow-Methods",
+          "value": "GET, POST, PUT, DELETE, OPTIONS"
+        },
+        {
+          "key": "Access-Control-Allow-Headers",
+          "value": "Content-Type, Authorization"
+        }
+      ]
+    }
+  ]
+}
