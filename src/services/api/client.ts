@@ -68,14 +68,7 @@ class ApiClient {
           : "unknown";
 
         // Handle different error types
-        if (error.code === "ERR_NETWORK") {
-          toast.error(
-            "Network or CORS Error. Please check your connection or backend status."
-          );
-        } else if (
-          error.response?.status === 401 ||
-          error.response?.status === 403
-        ) {
+        if (error.response?.status === 401 || error.response?.status === 403) {
           toast.error("Unauthorized - Please login again");
           useAuthStore.getState().logout();
         }
