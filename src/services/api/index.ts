@@ -423,8 +423,11 @@ export const tenantsApi = {
 };
 
 export const providersApi = {
-  list: async (): Promise<any[]> => {
-    const response = await apiClient.get("/threat-intel/providers/tenant_id");
+  list: async (tenantId?: string): Promise<any[]> => {
+    // Adding tenant_id as query param to satisfy backend auth dependencies
+    const response = await apiClient.get("/threat-intel/providers/tenant_id", {
+      params: { tenant_id: tenantId },
+    });
     return response.data;
   },
   create: async (data: any): Promise<any> => {
