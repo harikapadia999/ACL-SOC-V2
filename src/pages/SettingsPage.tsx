@@ -21,7 +21,14 @@ import {
 import { getErrorMessage } from "@/lib/utils";
 import toast from "react-hot-toast";
 
-type TabType = "tenants" | "providers" | "integrations" | "users" | "siem";
+type TabType =
+  | "tenants"
+  | "providers"
+  | "integrations"
+  | "users"
+  | "siem"
+  | "preferences"
+  | "notifications";
 
 export const SettingsPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabType>("tenants");
@@ -47,6 +54,16 @@ export const SettingsPage: React.FC = () => {
   });
   const [usersError, setUsersError] = useState<string | null>(null);
 
+  const [darkMode, setDarkMode] = useState(false);
+  const [autoRefresh, setAutoRefresh] = useState(true);
+  const [showResolved, setShowResolved] = useState(true);
+  const [alertRetention, setAlertRetention] = useState(20);
+
+  const [emailNotif, setEmailNotif] = useState(true);
+  const [slackNotif, setSlackNotif] = useState(true);
+  const [smsNotif, setSmsNotif] = useState(true);
+  const [notifEmail, setNotifEmail] = useState("soc-team@company");
+
   const [newTenant, setNewTenant] = useState({
     tenant_name: "",
     siem_tenant_id: "",
@@ -54,6 +71,9 @@ export const SettingsPage: React.FC = () => {
   });
   const [editingTenantId, setEditingTenantId] = useState<string | null>(null);
   const [openTenantActionsMenuId, setOpenTenantActionsMenuId] = useState<
+    string | null
+  >(null);
+  const [openIntegrationMenuId, setOpenIntegrationMenuId] = useState<
     string | null
   >(null);
   const [newProvider, setNewProvider] = useState({
@@ -458,10 +478,10 @@ export const SettingsPage: React.FC = () => {
                 <th className="p-4 text-sm font-medium text-slate-600">
                   Status
                 </th>
-                <th className="hidden p-4 text-sm font-medium text-slate-600 lg:table-cell">
+                <th className="p-4 text-sm font-medium text-slate-600">
                   Created At
                 </th>
-                <th className="hidden p-4 text-sm font-medium text-slate-600 lg:table-cell">
+                <th className="p-4 text-sm font-medium text-slate-600">
                   Updated At
                 </th>
                 <th className="p-4 text-sm font-medium text-slate-600"></th>
@@ -479,68 +499,65 @@ export const SettingsPage: React.FC = () => {
                     <td className="p-4 text-slate-600 text-sm font-mono truncate max-w-[120px] sm:max-w-xs">
                       {t.tenant_id || t.id}
                     </td>
-                    <td className="p-4 text-sm text-slate-600">
-                      {t.is_active !== false ? (
-                        <span className="inline-flex rounded-full bg-[#E6F4EA] px-2 py-0.5 text-xs font-semibold text-[#137333]">
+                    <td className="p-4 text-sm text-slate-600 dark:text-slate-400">
+                      {t.is_active ? (
+                        <span className="inline-flex rounded-full bg-green-100 dark:bg-green-900/30 px-2 py-0.5 text-xs font-semibold text-green-800 dark:text-green-300">
                           Active
                         </span>
                       ) : (
-                        <span className="inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">
+                        <span className="inline-flex rounded-full bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-xs font-semibold text-slate-600 dark:text-slate-400">
                           Inactive
                         </span>
                       )}
                     </td>
-                    <td className="hidden whitespace-nowrap p-4 text-sm text-slate-600 lg:table-cell">
+                    <td className="whitespace-nowrap p-4 text-sm text-slate-600 dark:text-slate-400">
                       {t.created_at
                         ? new Date(t.created_at).toLocaleString()
                         : "-"}
                     </td>
-                    <td className="hidden whitespace-nowrap p-4 text-sm text-slate-600 lg:table-cell">
+                    <td className="whitespace-nowrap p-4 text-sm text-slate-600 dark:text-slate-400">
                       {t.updated_at
                         ? new Date(t.updated_at).toLocaleString()
                         : "-"}
                     </td>
                     <td className="relative p-4 text-right">
-                      {(user?.isAdmin ||
-                        user?.tenant_ids?.includes(t.tenant_id || t.id)) && (
-                        <>
-                          <button
-                            onClick={() =>
-                              setOpenTenantActionsMenuId(
-                                isMenuOpen ? null : t.tenant_id || t.id
-                              )
-                            }
-                            className="p-1.5 text-slate-400 hover:text-slate-600 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-                          >
-                            <MoreVertical className="h-5 w-5" />
-                          </button>
-                          {isMenuOpen && (
-                            <>
-                              <div
-                                className="fixed inset-0 z-10"
-                                onClick={() => setOpenTenantActionsMenuId(null)}
-                              />
-                              <div className="absolute right-4 z-20 mt-2 w-32 rounded-lg border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-700 dark:bg-slate-800">
-                                <button
-                                  className="flex w-full items-center px-4 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-700"
-                                  onClick={() => handleEditTenantClick(t)}
-                                >
-                                  <Edit2 className="mr-2 h-4 w-4" /> Edit
-                                </button>
-                                <button
-                                  className="flex w-full items-center px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20"
-                                  onClick={() => {
-                                    setOpenTenantActionsMenuId(null);
-                                    handleDeleteTenant(t.tenant_id || t.id);
-                                  }}
-                                >
-                                  <Trash2 className="mr-2 h-4 w-4" /> Delete
-                                </button>
-                              </div>
-                            </>
-                          )}
-                        </>
-                      )}
+                      <>
+                        <button
+                          onClick={() =>
+                            setOpenTenantActionsMenuId(
+                              isMenuOpen ? null : t.tenant_id || t.id
+                            )
+                          }
+                          className="p-1.5 text-slate-400 hover:text-slate-600 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                        >
+                          <MoreVertical className="h-5 w-5" />
+                        </button>
+                        {isMenuOpen && (
+                          <>
+                            <div
+                              className="fixed inset-0 z-10"
+                              onClick={() => setOpenTenantActionsMenuId(null)}
+                            />
+                            <div className="absolute right-4 z-20 mt-2 w-32 rounded-lg border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-700 dark:bg-slate-800">
+                              <button
+                                className="flex w-full items-center px-4 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-700"
+                                onClick={() => handleEditTenantClick(t)}
+                              >
+                                <Edit2 className="mr-2 h-4 w-4" /> Edit
+                              </button>
+                              <button
+                                className="flex w-full items-center px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
+                                onClick={() => {
+                                  setOpenTenantActionsMenuId(null);
+                                  handleDeleteTenant(t.tenant_id || t.id);
+                                }}
+                              >
+                                <Trash2 className="mr-2 h-4 w-4" /> Delete
+                              </button>
+                            </div>
+                          </>
+                        )}
+                      </>
                     </td>
                   </tr>
                 );
@@ -721,6 +738,9 @@ export const SettingsPage: React.FC = () => {
                 <th className="p-4 text-center text-sm font-medium text-slate-600">
                   Rate Limit
                 </th>
+                <th className="p-4 text-center text-sm font-medium text-slate-600">
+                  IoCs
+                </th>
                 <th className="p-4 text-sm font-medium text-slate-600">
                   Auth Method
                 </th>
@@ -749,6 +769,11 @@ export const SettingsPage: React.FC = () => {
                   </td>
                   <td className="p-4 text-center font-mono text-sm text-slate-600">
                     {p.rate_limit_per_minute || "-"} /min
+                  </td>
+                  <td className="p-4 text-center text-sm text-slate-600">
+                    {Array.isArray(p.supported_iocs)
+                      ? p.supported_iocs.join(", ").toUpperCase()
+                      : "-"}
                   </td>
                   <td className="p-4 text-sm text-slate-600">
                     {p.auth_method}
@@ -887,6 +912,10 @@ export const SettingsPage: React.FC = () => {
             <label className="text-xs font-semibold text-slate-600">
               Config (JSON)
             </label>
+            <div className="text-[10px] text-slate-500 mb-1">
+              Schema:{" "}
+              <span className="font-mono">{`{"base_url": "...", "alerts_url": "...", "verify": true}`}</span>
+            </div>
             <textarea
               className="input h-24 font-mono text-xs"
               placeholder='{"base_url": "..."}'
@@ -922,7 +951,7 @@ export const SettingsPage: React.FC = () => {
                   Integration ID
                 </th>
                 <th className="p-4 text-sm font-medium text-slate-600">
-                  Provider ID
+                  Provider Name
                 </th>
                 <th className="p-4 text-center text-sm font-medium text-slate-600">
                   Priority
@@ -936,56 +965,83 @@ export const SettingsPage: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {integrations.map((p) => (
-                <tr key={p.id}>
-                  <td className="p-4 font-mono text-sm text-slate-600">
-                    {p.id}
-                  </td>
-                  <td className="p-4 font-medium text-slate-900">
-                    {providers.find((prov) => prov.id === p.provider_id)
-                      ?.provider_name || `Provider #${p.provider_id}`}
-                  </td>
-                  <td className="p-4 text-center text-sm text-slate-600">
-                    <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-slate-100 font-medium">
-                      {p.priority || 1}
-                    </span>
-                  </td>
-                  <td className="p-4 text-sm text-slate-600">
-                    <span
-                      className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${p.is_active ? "bg-green-100 text-green-800" : "bg-slate-100 text-slate-800"}`}
-                    >
-                      {p.is_active ? "Active" : "Inactive"}
-                    </span>
-                  </td>
-                  <td className="p-4 text-right">
-                    <button
-                      onClick={async () => {
-                        if (!activeTenant) return;
-                        try {
-                          await integrationsApi.update(activeTenant, p.id, {
-                            is_active: !p.is_active,
-                          });
-                          toast.success(
-                            `Integration ${p.is_active ? "deactivated" : "activated"}`
-                          );
-                          loadIntegrations();
-                        } catch (e) {
-                          toast.error("Failed to toggle status");
+              {integrations.map((p) => {
+                const isMenuOpen = openIntegrationMenuId === p.id;
+                return (
+                  <tr key={p.id}>
+                    <td className="p-4 font-mono text-sm text-slate-600">
+                      {p.id}
+                    </td>
+                    <td className="p-4 font-medium text-slate-900">
+                      {providers.find((prov) => prov.id === p.provider_id)
+                        ?.provider_name || `Provider #${p.provider_id}`}
+                    </td>
+                    <td className="p-4 text-center text-sm text-slate-600">
+                      <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-slate-100 font-medium">
+                        {p.priority || 1}
+                      </span>
+                    </td>
+                    <td className="p-4 text-sm text-slate-600">
+                      <span
+                        className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${p.is_active ? "bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300" : "bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-400"}`}
+                      >
+                        {p.is_active ? "Active" : "Inactive"}
+                      </span>
+                    </td>
+                    <td className="relative p-4 text-right">
+                      <button
+                        onClick={() =>
+                          setOpenIntegrationMenuId(isMenuOpen ? null : p.id)
                         }
-                      }}
-                      className="mr-2 rounded border p-1 px-2 py-1 text-xs text-slate-500 hover:text-slate-700"
-                    >
-                      {p.is_active ? "Deactivate" : "Activate"}
-                    </button>
-                    <button
-                      onClick={() => handleDeleteIntegration(p.id)}
-                      className="p-1 text-red-500 hover:text-red-700"
-                    >
-                      <Trash2 className="inline h-4 w-4" />
-                    </button>
-                  </td>
-                </tr>
-              ))}
+                        className="p-1.5 text-slate-400 hover:text-slate-600 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                      >
+                        <MoreVertical className="h-5 w-5" />
+                      </button>
+                      {isMenuOpen && (
+                        <>
+                          <div
+                            className="fixed inset-0 z-10"
+                            onClick={() => setOpenIntegrationMenuId(null)}
+                          />
+                          <div className="absolute right-4 z-20 mt-2 w-36 rounded-lg border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-700 dark:bg-slate-800">
+                            <button
+                              className="flex w-full items-center px-4 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-700"
+                              onClick={async () => {
+                                if (!activeTenant) return;
+                                try {
+                                  setOpenIntegrationMenuId(null);
+                                  await integrationsApi.update(
+                                    activeTenant,
+                                    p.id,
+                                    { is_active: !p.is_active }
+                                  );
+                                  toast.success(
+                                    `Integration ${p.is_active ? "deactivated" : "activated"}`
+                                  );
+                                  loadIntegrations();
+                                } catch (e) {
+                                  toast.error("Failed to toggle status");
+                                }
+                              }}
+                            >
+                              {p.is_active ? "Deactivate" : "Activate"}
+                            </button>
+                            <button
+                              className="flex w-full items-center px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
+                              onClick={() => {
+                                setOpenIntegrationMenuId(null);
+                                handleDeleteIntegration(p.id);
+                              }}
+                            >
+                              <Trash2 className="mr-2 h-4 w-4" /> Delete
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
               {integrations.length === 0 && (
                 <tr>
                   <td colSpan={5} className="p-4 text-center text-slate-500">
@@ -1317,6 +1373,20 @@ export const SettingsPage: React.FC = () => {
             <Settings className="mr-2 inline h-4 w-4 align-text-bottom" /> SIEM
             Integration
           </button>
+          <button
+            onClick={() => setActiveTab("preferences")}
+            className={`pb-3 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === "preferences" ? "border-blue-600 text-blue-600" : "border-transparent text-slate-600 hover:text-slate-900 dark:hover:text-slate-100"}`}
+          >
+            <Sliders className="mr-2 inline h-4 w-4 align-text-bottom" />{" "}
+            Preferences
+          </button>
+          <button
+            onClick={() => setActiveTab("notifications")}
+            className={`pb-3 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === "notifications" ? "border-blue-600 text-blue-600" : "border-transparent text-slate-600 hover:text-slate-900 dark:hover:text-slate-100"}`}
+          >
+            <Bell className="mr-2 inline h-4 w-4 align-text-bottom" />{" "}
+            Notifications
+          </button>
         </nav>
       </div>
 
@@ -1326,6 +1396,250 @@ export const SettingsPage: React.FC = () => {
         {activeTab === "integrations" && renderIntegrationsTab()}
         {activeTab === "users" && renderUsersTab()}
         {activeTab === "siem" && renderSiemTab()}
+        {activeTab === "preferences" && (
+          <div className="card divide-y divide-slate-100 rounded-lg border border-slate-200 bg-white shadow-sm dark:divide-slate-800 dark:bg-slate-900">
+            <div className="p-6">
+              <h3 className="mb-6 text-lg font-medium text-slate-900 dark:text-slate-100">
+                Preferences
+              </h3>
+              <div className="space-y-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-sm font-medium text-slate-900 dark:text-slate-100">
+                      Dark mode
+                    </div>
+                    <div className="text-sm text-slate-500">
+                      Use dark theme for the interface
+                    </div>
+                  </div>
+                  <label className="flex cursor-pointer items-center">
+                    <div className="relative">
+                      <input
+                        type="checkbox"
+                        className="sr-only"
+                        checked={darkMode}
+                        onChange={(e) => {
+                          setDarkMode(e.target.checked);
+                          if (e.target.checked)
+                            document.documentElement.classList.add("dark");
+                          else
+                            document.documentElement.classList.remove("dark");
+                        }}
+                      />
+                      <div
+                        className={`block w-10 h-6 rounded-full transition-colors ${darkMode ? "bg-blue-600" : "bg-slate-200 dark:bg-slate-700"}`}
+                      ></div>
+                      <div
+                        className={`dot absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition transform ${darkMode ? "translate-x-4" : ""}`}
+                      ></div>
+                    </div>
+                    <div className="ml-3 text-sm text-slate-700 dark:text-slate-300 min-w-[60px]">
+                      {darkMode ? "Enabled" : "Disabled"}
+                    </div>
+                  </label>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-sm font-medium text-slate-900 dark:text-slate-100">
+                      Auto refresh Dashboard
+                    </div>
+                    <div className="text-sm text-slate-500">
+                      Automatically refresh alert data every 30 seconds
+                    </div>
+                  </div>
+                  <label className="flex cursor-pointer items-center">
+                    <div className="relative">
+                      <input
+                        type="checkbox"
+                        className="sr-only"
+                        checked={autoRefresh}
+                        onChange={(e) => setAutoRefresh(e.target.checked)}
+                      />
+                      <div
+                        className={`block w-10 h-6 rounded-full transition-colors ${autoRefresh ? "bg-blue-600" : "bg-slate-200 dark:bg-slate-700"}`}
+                      ></div>
+                      <div
+                        className={`dot absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition transform ${autoRefresh ? "translate-x-4" : ""}`}
+                      ></div>
+                    </div>
+                    <div className="ml-3 text-sm text-slate-700 dark:text-slate-300 min-w-[60px]">
+                      {autoRefresh ? "Enabled" : "Disabled"}
+                    </div>
+                  </label>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-sm font-medium text-slate-900 dark:text-slate-100">
+                      Show resolved alerts
+                    </div>
+                    <div className="text-sm text-slate-500">
+                      Display resolved alerts in the dashboard
+                    </div>
+                  </div>
+                  <label className="flex cursor-pointer items-center">
+                    <div className="relative">
+                      <input
+                        type="checkbox"
+                        className="sr-only"
+                        checked={showResolved}
+                        onChange={(e) => setShowResolved(e.target.checked)}
+                      />
+                      <div
+                        className={`block w-10 h-6 rounded-full transition-colors ${showResolved ? "bg-blue-600" : "bg-slate-200 dark:bg-slate-700"}`}
+                      ></div>
+                      <div
+                        className={`dot absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition transform ${showResolved ? "translate-x-4" : ""}`}
+                      ></div>
+                    </div>
+                    <div className="ml-3 text-sm text-slate-700 dark:text-slate-300 min-w-[60px]">
+                      {showResolved ? "Enabled" : "Disabled"}
+                    </div>
+                  </label>
+                </div>
+
+                <div className="flex items-center justify-between pt-2">
+                  <div>
+                    <div className="mb-1 text-sm font-medium text-slate-900 dark:text-slate-100">
+                      Alert retention period
+                    </div>
+                    <div className="text-sm text-slate-500">
+                      No of days to retain alert history
+                    </div>
+                  </div>
+                  <div>
+                    <input
+                      type="number"
+                      className="input w-20 text-center"
+                      value={alertRetention}
+                      onChange={(e) =>
+                        setAlertRetention(parseInt(e.target.value) || 20)
+                      }
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+        {activeTab === "notifications" && (
+          <div className="card divide-y divide-slate-100 rounded-lg border border-slate-200 bg-white shadow-sm dark:divide-slate-800 dark:bg-slate-900">
+            <div className="p-6">
+              <h3 className="mb-6 text-lg font-medium text-slate-900 dark:text-slate-100">
+                Notifications
+              </h3>
+              <div className="space-y-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-sm font-medium text-slate-900 dark:text-slate-100">
+                      Email notifications
+                    </div>
+                    <div className="text-sm text-slate-500">
+                      Receive email alerts for critical incidents
+                    </div>
+                  </div>
+                  <label className="flex cursor-pointer items-center">
+                    <div className="relative">
+                      <input
+                        type="checkbox"
+                        className="sr-only"
+                        checked={emailNotif}
+                        onChange={(e) => setEmailNotif(e.target.checked)}
+                      />
+                      <div
+                        className={`block w-10 h-6 rounded-full transition-colors ${emailNotif ? "bg-blue-600" : "bg-slate-200 dark:bg-slate-700"}`}
+                      ></div>
+                      <div
+                        className={`dot absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition transform ${emailNotif ? "translate-x-4" : ""}`}
+                      ></div>
+                    </div>
+                    <div className="ml-3 text-sm text-slate-700 dark:text-slate-300 min-w-[60px]">
+                      {emailNotif ? "Enabled" : "Disabled"}
+                    </div>
+                  </label>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-sm font-medium text-slate-900 dark:text-slate-100">
+                      Slack notifications
+                    </div>
+                    <div className="text-sm text-slate-500">
+                      Send alerts to slack channel
+                    </div>
+                  </div>
+                  <label className="flex cursor-pointer items-center">
+                    <div className="relative">
+                      <input
+                        type="checkbox"
+                        className="sr-only"
+                        checked={slackNotif}
+                        onChange={(e) => setSlackNotif(e.target.checked)}
+                      />
+                      <div
+                        className={`block w-10 h-6 rounded-full transition-colors ${slackNotif ? "bg-blue-600" : "bg-slate-200 dark:bg-slate-700"}`}
+                      ></div>
+                      <div
+                        className={`dot absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition transform ${slackNotif ? "translate-x-4" : ""}`}
+                      ></div>
+                    </div>
+                    <div className="ml-3 text-sm text-slate-700 dark:text-slate-300 min-w-[60px]">
+                      {slackNotif ? "Enabled" : "Disabled"}
+                    </div>
+                  </label>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-sm font-medium text-slate-900 dark:text-slate-100">
+                      SMS Alerts
+                    </div>
+                    <div className="text-sm text-slate-500">
+                      Receive SMS for P1 critical alerts
+                    </div>
+                  </div>
+                  <label className="flex cursor-pointer items-center">
+                    <div className="relative">
+                      <input
+                        type="checkbox"
+                        className="sr-only"
+                        checked={smsNotif}
+                        onChange={(e) => setSmsNotif(e.target.checked)}
+                      />
+                      <div
+                        className={`block w-10 h-6 rounded-full transition-colors ${smsNotif ? "bg-blue-600" : "bg-slate-200 dark:bg-slate-700"}`}
+                      ></div>
+                      <div
+                        className={`dot absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition transform ${smsNotif ? "translate-x-4" : ""}`}
+                      ></div>
+                    </div>
+                    <div className="ml-3 text-sm text-slate-700 dark:text-slate-300 min-w-[60px]">
+                      {smsNotif ? "Enabled" : "Disabled"}
+                    </div>
+                  </label>
+                </div>
+
+                <div className="pt-2">
+                  <div className="mb-2">
+                    <div className="text-sm font-medium text-slate-900 dark:text-slate-100">
+                      Notification email
+                    </div>
+                    <div className="text-sm text-slate-500">
+                      Primary email for receiving notifications
+                    </div>
+                  </div>
+                  <input
+                    type="email"
+                    className="input max-w-md"
+                    value={notifEmail}
+                    onChange={(e) => setNotifEmail(e.target.value)}
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
