@@ -28,7 +28,11 @@ export const SettingsPage: React.FC = () => {
   const { activeTenant, setActiveTenant } = useAuthStore();
   const [tenants, setTenants] = useState<any[]>([]);
   const [providers, setProviders] = useState<any[]>([]);
+  const [providersError, setProvidersError] = useState<string | null>(null);
   const [integrations, setIntegrations] = useState<any[]>([]);
+  const [integrationsError, setIntegrationsError] = useState<string | null>(
+    null
+  );
 
   const [newTenant, setNewTenant] = useState({
     tenant_name: "",
@@ -79,26 +83,38 @@ export const SettingsPage: React.FC = () => {
 
   const loadProviders = async () => {
     try {
+      setProvidersError(null);
       const data = await providersApi.list(activeTenant);
       setProviders(Array.isArray(data) ? data : []);
-    } catch (err) {
-      console.warn("Could not load providers");
+    } catch (err: any) {
+      console.warn("Could not load providers", err);
+      if (err.response?.status === 403) {
+        setProvidersError(
+          "You do not have permission to view or manage global Threat Intel Providers."
+        );
+      } else {
+        setProvidersError(
+          getErrorMessage(err, "Failed to load Threat Intel Providers.")
+        );
+      }
+      setProviders([]);
     }
   };
 
   const loadIntegrations = async () => {
-    if (
-      !activeTenant ||
-      activeTenant === "00000000-0000-0000-0000-000000000000"
-    ) {
+    if (!activeTenant) {
       setIntegrations([]);
       return;
     }
     try {
+      setIntegrationsError(null);
       const data = await integrationsApi.listForTenant(activeTenant);
       setIntegrations(Array.isArray(data) ? data : []);
     } catch (err) {
-      console.warn("Could not load integrations");
+      console.warn("Could not load integrations", err);
+      setIntegrationsError(
+        getErrorMessage(err, "Failed to load active Integrations.")
+      );
       setIntegrations([]);
     }
   };
@@ -279,13 +295,19 @@ export const SettingsPage: React.FC = () => {
         </button>
       </div>
 
-      <div className="card overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
-        <table className="w-full border-collapse text-left">
+      <div className="card overflow-hidden overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm">
+        <table className="w-full min-w-max border-collapse text-left">
           <thead>
             <tr className="border-b border-slate-200 bg-slate-50">
               <th className="p-4 text-sm font-medium text-slate-600">Name</th>
               <th className="p-4 text-sm font-medium text-slate-600">ID</th>
               <th className="p-4 text-sm font-medium text-slate-600">Status</th>
+              <th className="p-4 text-sm font-medium text-slate-600">
+                Created At
+              </th>
+              <th className="p-4 text-sm font-medium text-slate-600">
+                Updated At
+              </th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -298,15 +320,27 @@ export const SettingsPage: React.FC = () => {
                   {t.tenant_id || t.id}
                 </td>
                 <td className="p-4 text-sm text-slate-600">
-                  <span className="inline-flex rounded-full bg-green-100 px-2 py-1 text-xs font-semibold text-green-800">
-                    Active
-                  </span>
+                  {t.is_active !== false ? (
+                    <span className="inline-flex rounded-full bg-[#E6F4EA] px-2 py-0.5 text-xs font-semibold text-[#137333]">
+                      Active
+                    </span>
+                  ) : (
+                    <span className="inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">
+                      Inactive
+                    </span>
+                  )}
+                </td>
+                <td className="whitespace-nowrap p-4 text-sm text-slate-600">
+                  {t.created_at ? new Date(t.created_at).toLocaleString() : "-"}
+                </td>
+                <td className="whitespace-nowrap p-4 text-sm text-slate-600">
+                  {t.updated_at ? new Date(t.updated_at).toLocaleString() : "-"}
                 </td>
               </tr>
             ))}
             {tenants.length === 0 && (
               <tr>
-                <td colSpan={3} className="p-4 text-center text-slate-500">
+                <td colSpan={5} className="p-4 text-center text-slate-500">
                   No tenants found
                 </td>
               </tr>
@@ -430,55 +464,63 @@ export const SettingsPage: React.FC = () => {
       </div>
 
       <div className="card overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
-        <table className="w-full border-collapse text-left">
-          <thead>
-            <tr className="border-b border-slate-200 bg-slate-50">
-              <th className="p-4 text-sm font-medium text-slate-600">ID</th>
-              <th className="p-4 text-sm font-medium text-slate-600">Name</th>
-              <th className="p-4 text-center text-sm font-medium text-slate-600">
-                Batching
-              </th>
-              <th className="p-4 text-center text-sm font-medium text-slate-600">
-                Rate Limit
-              </th>
-              <th className="p-4 text-sm font-medium text-slate-600">
-                Auth Method
-              </th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {providers.map((p) => (
-              <tr key={p.id}>
-                <td className="p-4 font-medium text-slate-900">{p.id}</td>
-                <td className="p-4 font-medium text-slate-900">
-                  {p.provider_name}
-                </td>
-                <td className="p-4 text-center text-sm text-slate-600">
-                  {p.supports_batching ? (
-                    <span className="inline-flex rounded-full bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-800">
-                      Yes
-                    </span>
-                  ) : (
-                    <span className="inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-500">
-                      No
-                    </span>
-                  )}
-                </td>
-                <td className="p-4 text-center font-mono text-sm text-slate-600">
-                  {p.rate_limit_per_minute || "-"} /min
-                </td>
-                <td className="p-4 text-sm text-slate-600">{p.auth_method}</td>
+        {providersError ? (
+          <div className="border-b border-red-100 bg-red-50 p-8 text-center text-red-600">
+            {providersError}
+          </div>
+        ) : (
+          <table className="w-full border-collapse text-left">
+            <thead>
+              <tr className="border-b border-slate-200 bg-slate-50">
+                <th className="p-4 text-sm font-medium text-slate-600">ID</th>
+                <th className="p-4 text-sm font-medium text-slate-600">Name</th>
+                <th className="p-4 text-center text-sm font-medium text-slate-600">
+                  Batching
+                </th>
+                <th className="p-4 text-center text-sm font-medium text-slate-600">
+                  Rate Limit
+                </th>
+                <th className="p-4 text-sm font-medium text-slate-600">
+                  Auth Method
+                </th>
               </tr>
-            ))}
-            {providers.length === 0 && (
-              <tr>
-                <td colSpan={3} className="p-4 text-center text-slate-500">
-                  No providers found
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {providers.map((p) => (
+                <tr key={p.id}>
+                  <td className="p-4 font-medium text-slate-900">{p.id}</td>
+                  <td className="p-4 font-medium text-slate-900">
+                    {p.provider_name}
+                  </td>
+                  <td className="p-4 text-center text-sm text-slate-600">
+                    {p.supports_batching ? (
+                      <span className="inline-flex rounded-full bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-800">
+                        Yes
+                      </span>
+                    ) : (
+                      <span className="inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-500">
+                        No
+                      </span>
+                    )}
+                  </td>
+                  <td className="p-4 text-center font-mono text-sm text-slate-600">
+                    {p.rate_limit_per_minute || "-"} /min
+                  </td>
+                  <td className="p-4 text-sm text-slate-600">
+                    {p.auth_method}
+                  </td>
+                </tr>
+              ))}
+              {providers.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="p-4 text-center text-slate-500">
+                    No providers found
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        )}
       </div>
     </div>
   );
@@ -608,62 +650,72 @@ export const SettingsPage: React.FC = () => {
       </div>
 
       <div className="card overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
-        <table className="w-full border-collapse text-left">
-          <thead>
-            <tr className="border-b border-slate-200 bg-slate-50">
-              <th className="p-4 text-sm font-medium text-slate-600">
-                Integration ID
-              </th>
-              <th className="p-4 text-sm font-medium text-slate-600">
-                Provider ID
-              </th>
-              <th className="p-4 text-center text-sm font-medium text-slate-600">
-                Priority
-              </th>
-              <th className="p-4 text-sm font-medium text-slate-600">Status</th>
-              <th className="p-4 text-right text-sm font-medium text-slate-600">
-                Actions
-              </th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {integrations.map((p) => (
-              <tr key={p.id}>
-                <td className="p-4 font-mono text-sm text-slate-600">{p.id}</td>
-                <td className="p-4 font-medium text-slate-900">
-                  Provider #{p.provider_id}
-                </td>
-                <td className="p-4 text-center text-sm text-slate-600">
-                  <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-slate-100 font-medium">
-                    {p.priority || 1}
-                  </span>
-                </td>
-                <td className="p-4 text-sm text-slate-600">
-                  <span
-                    className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${p.is_active ? "bg-green-100 text-green-800" : "bg-slate-100 text-slate-800"}`}
-                  >
-                    {p.is_active ? "Active" : "Inactive"}
-                  </span>
-                </td>
-                <td className="p-4 text-right">
-                  <button
-                    onClick={() => handleDeleteIntegration(p.id)}
-                    className="p-1 text-red-500 hover:text-red-700"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                </td>
+        {integrationsError ? (
+          <div className="border-b border-red-100 bg-red-50 p-8 text-center text-red-600">
+            {integrationsError}
+          </div>
+        ) : (
+          <table className="w-full border-collapse text-left">
+            <thead>
+              <tr className="border-b border-slate-200 bg-slate-50">
+                <th className="p-4 text-sm font-medium text-slate-600">
+                  Integration ID
+                </th>
+                <th className="p-4 text-sm font-medium text-slate-600">
+                  Provider ID
+                </th>
+                <th className="p-4 text-center text-sm font-medium text-slate-600">
+                  Priority
+                </th>
+                <th className="p-4 text-sm font-medium text-slate-600">
+                  Status
+                </th>
+                <th className="p-4 text-right text-sm font-medium text-slate-600">
+                  Actions
+                </th>
               </tr>
-            ))}
-            {integrations.length === 0 && (
-              <tr>
-                <td colSpan={4} className="p-4 text-center text-slate-500">
-                  No active integrations found for this tenant.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {integrations.map((p) => (
+                <tr key={p.id}>
+                  <td className="p-4 font-mono text-sm text-slate-600">
+                    {p.id}
+                  </td>
+                  <td className="p-4 font-medium text-slate-900">
+                    Provider #{p.provider_id}
+                  </td>
+                  <td className="p-4 text-center text-sm text-slate-600">
+                    <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-slate-100 font-medium">
+                      {p.priority || 1}
+                    </span>
+                  </td>
+                  <td className="p-4 text-sm text-slate-600">
+                    <span
+                      className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${p.is_active ? "bg-green-100 text-green-800" : "bg-slate-100 text-slate-800"}`}
+                    >
+                      {p.is_active ? "Active" : "Inactive"}
+                    </span>
+                  </td>
+                  <td className="p-4 text-right">
+                    <button
+                      onClick={() => handleDeleteIntegration(p.id)}
+                      className="p-1 text-red-500 hover:text-red-700"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+              {integrations.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="p-4 text-center text-slate-500">
+                    No active integrations found for this tenant.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        )}
       </div>
     </div>
   );

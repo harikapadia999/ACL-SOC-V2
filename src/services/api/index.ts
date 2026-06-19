@@ -144,9 +144,12 @@ const ensureTenantId = async (): Promise<string> => {
       }
     }
   } catch (e) {
-    console.warn("Failed to fetch tenants fallback:", e);
+    console.warn("Failed to fetch tenants for active tenant resolution:", e);
   }
-  return "00000000-0000-0000-0000-000000000000"; // Absolute fallback
+
+  throw new Error(
+    "No active tenant found. Please select or create a tenant first."
+  );
 };
 
 export const dashboardApi = {
@@ -159,12 +162,9 @@ export const dashboardApi = {
       const tenantId = await ensureTenantId();
 
       // Only fetch alerts since dashboard metrics endpoint is missing from spec
-      const alertsResponse = await apiClient
-        .get<any[]>("/api/v1/alerts", { params: { tenant_id: tenantId } })
-        .catch((e) => {
-          if (e.response?.status === 401 || e.response?.status === 403) throw e;
-          return { data: [] }; // Fallback to empty array if backend is failing
-        });
+      const alertsResponse = await apiClient.get<any[]>("/api/v1/alerts", {
+        params: { tenant_id: tenantId },
+      });
 
       let alertsData = [];
       if (alertsResponse && Array.isArray(alertsResponse.data)) {
@@ -209,14 +209,9 @@ export const alertsApi = {
   getAllAlerts: async (): Promise<Alert[]> => {
     try {
       const tenantId = await ensureTenantId();
-      const response = await apiClient
-        .get<any[]>("/api/v1/alerts", {
-          params: { tenant_id: tenantId },
-        })
-        .catch((e) => {
-          if (e.response?.status === 401 || e.response?.status === 403) throw e;
-          return { data: [] };
-        });
+      const response = await apiClient.get<any[]>("/api/v1/alerts", {
+        params: { tenant_id: tenantId },
+      });
       if (!response || !Array.isArray(response.data)) {
         return [];
       }
@@ -314,15 +309,9 @@ export const alertsApi = {
   searchAlerts: async (filters: AlertFilters): Promise<Alert[]> => {
     try {
       const tenantId = await ensureTenantId();
-      const response = await apiClient
-        .get<any[]>("/api/v1/alerts", {
-          params: { ...filters, tenant_id: tenantId },
-        })
-        .catch((e) => {
-          if (e.response?.status === 401 || e.response?.status === 403) throw e;
-          console.warn("Alerts search backend failure:", e.message);
-          return { data: [] };
-        });
+      const response = await apiClient.get<any[]>("/api/v1/alerts", {
+        params: { ...filters, tenant_id: tenantId },
+      });
       if (!response || !Array.isArray(response.data)) return [];
       return response.data
         .map((raw) => {
@@ -424,7 +413,7 @@ export const tenantsApi = {
 
 export const providersApi = {
   list: async (tenantId?: string): Promise<any[]> => {
-    // Adding tenant_id as query param to satisfy backend auth dependencies
+    // Sending tenant_id as query parameter just in case, though the endpoint might not require it
     const response = await apiClient.get("/threat-intel/providers/tenant_id", {
       params: { tenant_id: tenantId },
     });
@@ -443,7 +432,7 @@ export const integrationsApi = {
   },
   create: async (tenantId: string, data: any): Promise<any> => {
     const response = await apiClient.post(
-      `/tenants/${tenantId}/threat-intel/`,
+      `/tenants/${tenantId}/threat-intel`,
       data
     );
     return response.data;
