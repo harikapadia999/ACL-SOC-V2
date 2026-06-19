@@ -409,6 +409,13 @@ export const tenantsApi = {
     );
     return response.data;
   },
+  createSiem: async (tenantId: string, config: any): Promise<any> => {
+    const response = await apiClient.post(
+      `/api/v1/tenants/${tenantId}/SIEMconfig`,
+      config
+    );
+    return response.data;
+  },
 };
 
 export const providersApi = {
@@ -422,6 +429,16 @@ export const providersApi = {
   create: async (data: any): Promise<any> => {
     const response = await apiClient.post("/threat-intel/providers", data);
     return response.data;
+  },
+  update: async (providerId: string | number, data: any): Promise<any> => {
+    const response = await apiClient.patch(
+      `/threat-intel/providers/${providerId}`,
+      data
+    );
+    return response.data;
+  },
+  delete: async (providerId: string | number): Promise<void> => {
+    await apiClient.delete(`/threat-intel/providers/${providerId}`);
   },
 };
 
@@ -452,6 +469,19 @@ export const integrationsApi = {
     const response = await apiClient.delete(
       `/tenants/${tenantId}/threat-intel/${integrationId}`
     );
+    return response.data;
+  },
+};
+
+export const usersApi = {
+  list: async (): Promise<any[]> => {
+    // We only saw a POST in openapi.json, but maybe a GET exists on /api/v1/users/users?
+    // Let's assume there is, or just get from a different endpoint.
+    const response = await apiClient.get("/api/v1/users/users");
+    return response.data;
+  },
+  create: async (data: any): Promise<any> => {
+    const response = await apiClient.post("/api/v1/users/users", data);
     return response.data;
   },
 };

@@ -8,25 +8,28 @@ import {
   Key,
   Bell,
   Sliders,
+  MoreVertical,
+  Edit2,
 } from "lucide-react";
 import { useAuthStore } from "@/store/authStore";
-import { tenantsApi, providersApi, integrationsApi } from "@/services/api";
+import {
+  tenantsApi,
+  providersApi,
+  integrationsApi,
+  usersApi,
+} from "@/services/api";
 import { getErrorMessage } from "@/lib/utils";
 import toast from "react-hot-toast";
 
-type TabType =
-  | "tenants"
-  | "providers"
-  | "integrations"
-  | "notifications"
-  | "preferences";
+type TabType = "tenants" | "providers" | "integrations" | "users" | "siem";
 
 export const SettingsPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabType>("tenants");
   const [loading, setLoading] = useState(false);
 
-  const { activeTenant, setActiveTenant } = useAuthStore();
+  const { user, activeTenant, setActiveTenant } = useAuthStore();
   const [tenants, setTenants] = useState<any[]>([]);
+  const [tenantsError, setTenantsError] = useState<string | null>(null);
   const [providers, setProviders] = useState<any[]>([]);
   const [providersError, setProvidersError] = useState<string | null>(null);
   const [integrations, setIntegrations] = useState<any[]>([]);
@@ -34,11 +37,25 @@ export const SettingsPage: React.FC = () => {
     null
   );
 
+  const [users, setUsers] = useState<any[]>([]);
+  const [newUser, setNewUser] = useState({
+    email: "",
+    password: "",
+    full_name: "",
+    role: "analyst",
+    tenant_ids: [] as string[],
+  });
+  const [usersError, setUsersError] = useState<string | null>(null);
+
   const [newTenant, setNewTenant] = useState({
     tenant_name: "",
     siem_tenant_id: "",
     description: "",
   });
+  const [editingTenantId, setEditingTenantId] = useState<string | null>(null);
+  const [openTenantActionsMenuId, setOpenTenantActionsMenuId] = useState<
+    string | null
+  >(null);
   const [newProvider, setNewProvider] = useState({
     provider_name: "",
     auth_method: "api_key",
@@ -46,6 +63,7 @@ export const SettingsPage: React.FC = () => {
     credential_example: "{}",
     supports_batching: false,
     rate_limit_per_minute: "",
+    supported_iocs: ["ip", "domain", "url", "hash"],
   });
 
   const [newIntegration, setNewIntegration] = useState({
@@ -74,10 +92,13 @@ export const SettingsPage: React.FC = () => {
 
   const loadTenants = async () => {
     try {
+      setTenantsError(null);
       const data = await tenantsApi.listTenants();
       setTenants(Array.isArray(data) ? data : []);
-    } catch (err) {
-      console.warn("Could not load tenants");
+    } catch (err: any) {
+      console.warn("Could not load tenants", err);
+      setTenantsError(getErrorMessage(err, "Failed to load tenants."));
+      setTenants([]);
     }
   };
 
@@ -133,22 +154,129 @@ export const SettingsPage: React.FC = () => {
     if (activeTab === "integrations" && activeTenant) {
       loadIntegrations();
     }
+    if (activeTab === "users") {
+      loadUsers();
+    }
   }, [activeTab, activeTenant]);
 
-  const handleCreateTenant = async () => {
-    if (!newTenant.tenant_name || !newTenant.siem_tenant_id)
-      return toast.error("Name and SIEM ID required");
+  const loadUsers = async () => {
+    try {
+      setUsersError(null);
+      const data = await usersApi.list();
+      setUsers(Array.isArray(data) ? data : []);
+    } catch (e: any) {
+      setUsersError(getErrorMessage(e, "Failed to load users"));
+      setUsers([]);
+    }
+  };
+
+  const handleCreateUser = async () => {
+    if (!newUser.email || !newUser.password || !newUser.full_name)
+      return toast.error("Missing required fields");
     try {
       setLoading(true);
-      await tenantsApi.createTenant(newTenant);
-      toast.success("Tenant created!");
-      setNewTenant({ tenant_name: "", siem_tenant_id: "", description: "" });
-      loadTenants();
+      await usersApi.create({
+        ...newUser,
+        tenant_ids: [activeTenant],
+      });
+      toast.success("User created successfully!");
+      setNewUser({
+        email: "",
+        password: "",
+        full_name: "",
+        role: "analyst",
+        tenant_ids: [],
+      });
+      loadUsers();
     } catch (e: any) {
-      toast.error(getErrorMessage(e, "Failed to create tenant"));
+      toast.error(
+        "Failed to create user: " + getErrorMessage(e, "Check permissions")
+      );
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleCreateOrUpdateTenant = async () => {
+    if (!newTenant.tenant_name || newTenant.tenant_name.length < 3)
+      return toast.error("Tenant Name must be at least 3 characters");
+    if (!editingTenantId && !newTenant.siem_tenant_id)
+      return toast.error("SIEM ID is required for creation");
+
+    const payload: any = {
+      tenant_name: newTenant.tenant_name.trim(),
+      siem_tenant_id:
+        newTenant.siem_tenant_id && newTenant.siem_tenant_id.trim() !== ""
+          ? newTenant.siem_tenant_id.trim()
+          : null,
+    };
+    if (newTenant.description && newTenant.description.trim().length >= 5) {
+      payload.description = newTenant.description.trim();
+    }
+
+    try {
+      setLoading(true);
+      if (editingTenantId) {
+        await tenantsApi.updateConfig(editingTenantId, payload);
+        toast.success("Tenant updated!");
+      } else {
+        await tenantsApi.createTenant(payload);
+        toast.success("Tenant created!");
+      }
+      setNewTenant({ tenant_name: "", siem_tenant_id: "", description: "" });
+      setEditingTenantId(null);
+      loadTenants();
+    } catch (e: any) {
+      const msg = getErrorMessage(
+        e,
+        `Failed to ${editingTenantId ? "update" : "create"} tenant`
+      );
+      toast.error(msg);
+      if (e?.response?.status === 403) {
+        toast.error(
+          "Access Denied: You do not have permissions to modify this tenant."
+        );
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleEditTenantClick = (t: any) => {
+    setEditingTenantId(t.tenant_id || t.id);
+    setNewTenant({
+      tenant_name: t.tenant_name || t.client_name || "",
+      siem_tenant_id: t.siem_tenant_id || "",
+      description: t.description || "",
+    });
+    setOpenTenantActionsMenuId(null);
+  };
+
+  const handleDeleteTenant = async (id: string) => {
+    if (!confirm("Are you sure you want to delete this tenant?")) return;
+    try {
+      setLoading(true);
+      await tenantsApi.deleteTenant(id);
+      toast.success("Tenant deleted!");
+      loadTenants();
+      if (activeTenant === id) {
+        setActiveTenant(null);
+      }
+    } catch (e: any) {
+      toast.error(getErrorMessage(e, "Failed to delete tenant"));
+      if (e?.response?.status === 403) {
+        toast.error(
+          "Access Denied: You do not have permissions to delete tenants."
+        );
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCancelEdit = () => {
+    setEditingTenantId(null);
+    setNewTenant({ tenant_name: "", siem_tenant_id: "", description: "" });
   };
 
   const handleCreateProvider = async () => {
@@ -171,6 +299,7 @@ export const SettingsPage: React.FC = () => {
         credential_example: credExample,
         supports_batching: newProvider.supports_batching,
         rate_limit_per_minute: rateLimit,
+        supported_iocs: newProvider.supported_iocs,
       });
       toast.success("Provider created!");
       setNewProvider({
@@ -180,6 +309,7 @@ export const SettingsPage: React.FC = () => {
         credential_example: "{}",
         supports_batching: false,
         rate_limit_per_minute: "",
+        supported_iocs: ["ip", "domain", "url", "hash"],
       });
       loadProviders();
     } catch (e: any) {
@@ -241,9 +371,9 @@ export const SettingsPage: React.FC = () => {
 
   const renderTenantsTab = () => (
     <div className="space-y-6">
-      <div className="card rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+      <div className="card rounded-lg border border-slate-200 bg-white p-6 shadow-sm dark:bg-slate-900">
         <h3 className="mb-4 text-lg font-medium text-slate-900">
-          Create New Tenant
+          {editingTenantId ? "Edit Tenant" : "Create New Tenant"}
         </h3>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           <div className="space-y-1">
@@ -286,74 +416,152 @@ export const SettingsPage: React.FC = () => {
             />
           </div>
         </div>
-        <button
-          className="mt-4 flex items-center rounded-lg bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 disabled:opacity-50"
-          onClick={handleCreateTenant}
-          disabled={loading}
-        >
-          <Plus className="mr-2 h-4 w-4" /> Add Tenant
-        </button>
+        <div className="flex gap-2">
+          <button
+            className="mt-4 flex items-center rounded-lg bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 disabled:opacity-50"
+            onClick={handleCreateOrUpdateTenant}
+            disabled={loading}
+          >
+            {editingTenantId ? (
+              <>
+                <Edit2 className="mr-2 h-4 w-4" /> Update Tenant
+              </>
+            ) : (
+              <>
+                <Plus className="mr-2 h-4 w-4" /> Add Tenant
+              </>
+            )}
+          </button>
+          {editingTenantId && (
+            <button
+              className="mt-4 flex items-center rounded-lg bg-slate-100 px-4 py-2 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300"
+              onClick={handleCancelEdit}
+              disabled={loading}
+            >
+              Cancel
+            </button>
+          )}
+        </div>
       </div>
 
-      <div className="card overflow-hidden overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm">
-        <table className="w-full min-w-max border-collapse text-left">
-          <thead>
-            <tr className="border-b border-slate-200 bg-slate-50">
-              <th className="p-4 text-sm font-medium text-slate-600">Name</th>
-              <th className="p-4 text-sm font-medium text-slate-600">ID</th>
-              <th className="p-4 text-sm font-medium text-slate-600">Status</th>
-              <th className="p-4 text-sm font-medium text-slate-600">
-                Created At
-              </th>
-              <th className="p-4 text-sm font-medium text-slate-600">
-                Updated At
-              </th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {tenants.map((t) => (
-              <tr key={t.tenant_id}>
-                <td className="p-4 font-medium text-slate-900">
-                  {t.tenant_name || t.client_name}
-                </td>
-                <td className="p-4 font-mono text-sm text-slate-600">
-                  {t.tenant_id || t.id}
-                </td>
-                <td className="p-4 text-sm text-slate-600">
-                  {t.is_active !== false ? (
-                    <span className="inline-flex rounded-full bg-[#E6F4EA] px-2 py-0.5 text-xs font-semibold text-[#137333]">
-                      Active
-                    </span>
-                  ) : (
-                    <span className="inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">
-                      Inactive
-                    </span>
-                  )}
-                </td>
-                <td className="whitespace-nowrap p-4 text-sm text-slate-600">
-                  {t.created_at ? new Date(t.created_at).toLocaleString() : "-"}
-                </td>
-                <td className="whitespace-nowrap p-4 text-sm text-slate-600">
-                  {t.updated_at ? new Date(t.updated_at).toLocaleString() : "-"}
-                </td>
+      <div className="card bg-white dark:bg-slate-900 rounded-lg shadow-sm border border-slate-200 overflow-x-auto min-h-[300px] visible">
+        {tenantsError ? (
+          <div className="border-b border-red-100 bg-red-50 p-8 text-center text-red-600">
+            {tenantsError}
+          </div>
+        ) : (
+          <table className="w-full border-collapse text-left">
+            <thead>
+              <tr className="border-b border-slate-200 bg-slate-50">
+                <th className="p-4 text-sm font-medium text-slate-600">Name</th>
+                <th className="p-4 text-sm font-medium text-slate-600">ID</th>
+                <th className="p-4 text-sm font-medium text-slate-600">
+                  Status
+                </th>
+                <th className="hidden p-4 text-sm font-medium text-slate-600 lg:table-cell">
+                  Created At
+                </th>
+                <th className="hidden p-4 text-sm font-medium text-slate-600 lg:table-cell">
+                  Updated At
+                </th>
+                <th className="p-4 text-sm font-medium text-slate-600"></th>
               </tr>
-            ))}
-            {tenants.length === 0 && (
-              <tr>
-                <td colSpan={5} className="p-4 text-center text-slate-500">
-                  No tenants found
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {tenants.map((t) => {
+                const isMenuOpen =
+                  openTenantActionsMenuId === (t.tenant_id || t.id);
+                return (
+                  <tr key={t.tenant_id || t.id}>
+                    <td className="p-4 font-medium text-slate-900">
+                      {t.tenant_name || t.client_name}
+                    </td>
+                    <td className="p-4 text-slate-600 text-sm font-mono truncate max-w-[120px] sm:max-w-xs">
+                      {t.tenant_id || t.id}
+                    </td>
+                    <td className="p-4 text-sm text-slate-600">
+                      {t.is_active !== false ? (
+                        <span className="inline-flex rounded-full bg-[#E6F4EA] px-2 py-0.5 text-xs font-semibold text-[#137333]">
+                          Active
+                        </span>
+                      ) : (
+                        <span className="inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">
+                          Inactive
+                        </span>
+                      )}
+                    </td>
+                    <td className="hidden whitespace-nowrap p-4 text-sm text-slate-600 lg:table-cell">
+                      {t.created_at
+                        ? new Date(t.created_at).toLocaleString()
+                        : "-"}
+                    </td>
+                    <td className="hidden whitespace-nowrap p-4 text-sm text-slate-600 lg:table-cell">
+                      {t.updated_at
+                        ? new Date(t.updated_at).toLocaleString()
+                        : "-"}
+                    </td>
+                    <td className="relative p-4 text-right">
+                      {(user?.isAdmin ||
+                        user?.tenant_ids?.includes(t.tenant_id || t.id)) && (
+                        <>
+                          <button
+                            onClick={() =>
+                              setOpenTenantActionsMenuId(
+                                isMenuOpen ? null : t.tenant_id || t.id
+                              )
+                            }
+                            className="p-1.5 text-slate-400 hover:text-slate-600 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                          >
+                            <MoreVertical className="h-5 w-5" />
+                          </button>
+                          {isMenuOpen && (
+                            <>
+                              <div
+                                className="fixed inset-0 z-10"
+                                onClick={() => setOpenTenantActionsMenuId(null)}
+                              />
+                              <div className="absolute right-4 z-20 mt-2 w-32 rounded-lg border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-700 dark:bg-slate-800">
+                                <button
+                                  className="flex w-full items-center px-4 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-700"
+                                  onClick={() => handleEditTenantClick(t)}
+                                >
+                                  <Edit2 className="mr-2 h-4 w-4" /> Edit
+                                </button>
+                                <button
+                                  className="flex w-full items-center px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20"
+                                  onClick={() => {
+                                    setOpenTenantActionsMenuId(null);
+                                    handleDeleteTenant(t.tenant_id || t.id);
+                                  }}
+                                >
+                                  <Trash2 className="mr-2 h-4 w-4" /> Delete
+                                </button>
+                              </div>
+                            </>
+                          )}
+                        </>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+              {tenants.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="p-4 text-center text-slate-500">
+                    No tenants found
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        )}
       </div>
     </div>
   );
 
   const renderProvidersTab = () => (
     <div className="space-y-6">
-      <div className="card rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+      <div className="card rounded-lg border border-slate-200 bg-white p-6 shadow-sm dark:bg-slate-900">
         <h3 className="mb-4 text-lg font-medium text-slate-900">
           Create Threat Intel Provider
         </h3>
@@ -408,7 +616,7 @@ export const SettingsPage: React.FC = () => {
             />
           </div>
           <div className="col-span-1 space-y-1 md:col-span-2 lg:col-span-3">
-            <label className="flex cursor-pointer items-center space-x-2 text-sm text-slate-700">
+            <label className="mb-2 flex cursor-pointer items-center space-x-2 text-sm text-slate-700">
               <input
                 type="checkbox"
                 className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
@@ -422,6 +630,39 @@ export const SettingsPage: React.FC = () => {
               />
               <span>Supports Batching</span>
             </label>
+            <label className="mb-1 block text-xs font-semibold text-slate-600">
+              Supported IoCs *
+            </label>
+            <div className="flex gap-4">
+              {["ip", "domain", "url", "hash"].map((ioc) => (
+                <label
+                  key={ioc}
+                  className="flex cursor-pointer items-center space-x-2 text-sm text-slate-700"
+                >
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                    checked={newProvider.supported_iocs.includes(ioc)}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setNewProvider({
+                          ...newProvider,
+                          supported_iocs: [...newProvider.supported_iocs, ioc],
+                        });
+                      } else {
+                        setNewProvider({
+                          ...newProvider,
+                          supported_iocs: newProvider.supported_iocs.filter(
+                            (v) => v !== ioc
+                          ),
+                        });
+                      }
+                    }}
+                  />
+                  <span>{ioc.toUpperCase()}</span>
+                </label>
+              ))}
+            </div>
           </div>
           <div className="col-span-1 space-y-1 md:col-span-1 lg:col-span-2">
             <label className="text-xs font-semibold text-slate-600">
@@ -463,7 +704,7 @@ export const SettingsPage: React.FC = () => {
         </button>
       </div>
 
-      <div className="card overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+      <div className="card overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm dark:bg-slate-900">
         {providersError ? (
           <div className="border-b border-red-100 bg-red-50 p-8 text-center text-red-600">
             {providersError}
@@ -482,6 +723,9 @@ export const SettingsPage: React.FC = () => {
                 </th>
                 <th className="p-4 text-sm font-medium text-slate-600">
                   Auth Method
+                </th>
+                <th className="p-4 text-right text-sm font-medium text-slate-600">
+                  Actions
                 </th>
               </tr>
             </thead>
@@ -509,11 +753,28 @@ export const SettingsPage: React.FC = () => {
                   <td className="p-4 text-sm text-slate-600">
                     {p.auth_method}
                   </td>
+                  <td className="p-4 text-right">
+                    <button
+                      onClick={async () => {
+                        if (!confirm("Are you sure?")) return;
+                        try {
+                          await providersApi.delete(p.id);
+                          toast.success("Provider deleted");
+                          loadProviders();
+                        } catch (e) {
+                          toast.error("Failed to delete provider");
+                        }
+                      }}
+                      className="p-1 text-red-500 hover:text-red-700"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </td>
                 </tr>
               ))}
               {providers.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="p-4 text-center text-slate-500">
+                  <td colSpan={6} className="p-4 text-center text-slate-500">
                     No providers found
                   </td>
                 </tr>
@@ -527,12 +788,12 @@ export const SettingsPage: React.FC = () => {
 
   const renderIntegrationsTab = () => (
     <div className="space-y-6">
-      <div className="flex items-center gap-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
-        <span className="font-medium text-slate-700">
+      <div className="flex items-center gap-4 rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-900">
+        <span className="font-medium text-slate-700 dark:text-slate-300">
           Active Tenant Context:
         </span>
         <select
-          className="max-w-sm rounded-lg border px-3 py-2"
+          className="input max-w-sm"
           value={activeTenant || ""}
           onChange={(e) => setActiveTenant(e.target.value)}
         >
@@ -544,7 +805,7 @@ export const SettingsPage: React.FC = () => {
         </select>
       </div>
 
-      <div className="card rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+      <div className="card rounded-lg border border-slate-200 bg-white p-6 shadow-sm dark:bg-slate-900">
         <h3 className="mb-4 text-lg font-medium text-slate-900">
           Add Integration for Tenant
         </h3>
@@ -589,27 +850,26 @@ export const SettingsPage: React.FC = () => {
               min="1"
             />
           </div>
-          <div className="space-y-1">
-            <label className="text-xs font-semibold text-slate-600">
-              Quota Override
-            </label>
-            <input
-              type="number"
-              className="input"
-              placeholder="Leave empty for default"
-              value={newIntegration.quota_override}
-              onChange={(e) =>
-                setNewIntegration({
-                  ...newIntegration,
-                  quota_override: e.target.value,
-                })
-              }
-            />
-          </div>
           <div className="col-span-1 space-y-1 md:col-span-2 lg:col-span-2">
             <label className="text-xs font-semibold text-slate-600">
               Credentials (JSON) *
             </label>
+            {newIntegration.provider_id && (
+              <div className="text-[10px] text-slate-500 mb-1">
+                Schema:{" "}
+                <span className="font-mono">
+                  {providers.find(
+                    (p) => p.id === parseInt(newIntegration.provider_id)
+                  )?.auth_schema
+                    ? JSON.stringify(
+                        providers.find(
+                          (p) => p.id === parseInt(newIntegration.provider_id)
+                        )?.auth_schema
+                      )
+                    : "{}"}
+                </span>
+              </div>
+            )}
             <textarea
               className="input h-24 font-mono text-xs"
               placeholder='{"api_key": "abc..."}'
@@ -649,7 +909,7 @@ export const SettingsPage: React.FC = () => {
         </button>
       </div>
 
-      <div className="card overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+      <div className="card overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm dark:bg-slate-900">
         {integrationsError ? (
           <div className="border-b border-red-100 bg-red-50 p-8 text-center text-red-600">
             {integrationsError}
@@ -682,7 +942,8 @@ export const SettingsPage: React.FC = () => {
                     {p.id}
                   </td>
                   <td className="p-4 font-medium text-slate-900">
-                    Provider #{p.provider_id}
+                    {providers.find((prov) => prov.id === p.provider_id)
+                      ?.provider_name || `Provider #${p.provider_id}`}
                   </td>
                   <td className="p-4 text-center text-sm text-slate-600">
                     <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-slate-100 font-medium">
@@ -698,10 +959,29 @@ export const SettingsPage: React.FC = () => {
                   </td>
                   <td className="p-4 text-right">
                     <button
+                      onClick={async () => {
+                        if (!activeTenant) return;
+                        try {
+                          await integrationsApi.update(activeTenant, p.id, {
+                            is_active: !p.is_active,
+                          });
+                          toast.success(
+                            `Integration ${p.is_active ? "deactivated" : "activated"}`
+                          );
+                          loadIntegrations();
+                        } catch (e) {
+                          toast.error("Failed to toggle status");
+                        }
+                      }}
+                      className="mr-2 rounded border p-1 px-2 py-1 text-xs text-slate-500 hover:text-slate-700"
+                    >
+                      {p.is_active ? "Deactivate" : "Activate"}
+                    </button>
+                    <button
                       onClick={() => handleDeleteIntegration(p.id)}
                       className="p-1 text-red-500 hover:text-red-700"
                     >
-                      <Trash2 className="h-4 w-4" />
+                      <Trash2 className="inline h-4 w-4" />
                     </button>
                   </td>
                 </tr>
@@ -720,181 +1000,273 @@ export const SettingsPage: React.FC = () => {
     </div>
   );
 
-  const renderNotificationsTab = () => (
+  const renderUsersTab = () => (
     <div className="space-y-6">
-      <div className="card rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="max-w-3xl space-y-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-base text-slate-900">
-                Email notifications
-              </div>
-              <div className="text-sm text-slate-500">
-                Receive email alerts for critical incidents
-              </div>
-            </div>
-            <div className="flex items-center space-x-3">
-              <label className="relative inline-flex cursor-pointer items-center">
-                <input
-                  type="checkbox"
-                  className="peer sr-only"
-                  defaultChecked
-                />
-                <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#0078D4]"></div>
-              </label>
-              <span className="w-16 text-sm text-slate-700">Enabled</span>
-            </div>
-          </div>
+      <div className="flex items-center gap-4 rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-900">
+        <span className="font-medium text-slate-700 dark:text-slate-300">
+          Target Tenant:
+        </span>
+        <select
+          className="input max-w-sm"
+          value={activeTenant || ""}
+          onChange={(e) => setActiveTenant(e.target.value)}
+        >
+          {tenants.map((t) => (
+            <option key={t.tenant_id || t.id} value={t.tenant_id || t.id}>
+              {t.tenant_name || t.client_name}
+            </option>
+          ))}
+        </select>
+      </div>
 
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-base text-slate-900">
-                Slack notifications
-              </div>
-              <div className="text-sm text-slate-500">
-                Send alerts to slack channel
-              </div>
-            </div>
-            <div className="flex items-center space-x-3">
-              <label className="relative inline-flex cursor-pointer items-center">
-                <input
-                  type="checkbox"
-                  className="peer sr-only"
-                  defaultChecked
-                />
-                <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#0078D4]"></div>
-              </label>
-              <span className="w-16 text-sm text-slate-700">Enabled</span>
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-base text-slate-900">SMS Alerts</div>
-              <div className="text-sm text-slate-500">
-                Receive SMS for P1 critical alerts
-              </div>
-            </div>
-            <div className="flex items-center space-x-3">
-              <label className="relative inline-flex cursor-pointer items-center">
-                <input
-                  type="checkbox"
-                  className="peer sr-only"
-                  defaultChecked
-                />
-                <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#0078D4]"></div>
-              </label>
-              <span className="w-16 text-sm text-slate-700">Enabled</span>
-            </div>
-          </div>
-
-          <div className="pt-2">
-            <div>
-              <div className="text-base text-slate-900">Notification email</div>
-              <div className="mb-2 text-sm text-slate-500">
-                Primary email for receiving notifications
-              </div>
-            </div>
+      <div className="card rounded-lg border border-slate-200 bg-white p-6 shadow-sm dark:bg-slate-900">
+        <h3 className="mb-4 text-lg font-medium text-slate-900">Create User</h3>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <div className="space-y-1">
+            <label className="text-xs font-semibold text-slate-600">
+              Full Name *
+            </label>
             <input
-              type="text"
-              defaultValue="soc-team@company"
-              className="w-full max-w-sm rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="input"
+              placeholder="John Doe"
+              value={newUser.full_name}
+              onChange={(e) =>
+                setNewUser({ ...newUser, full_name: e.target.value })
+              }
             />
           </div>
+          <div className="space-y-1">
+            <label className="text-xs font-semibold text-slate-600">
+              Email *
+            </label>
+            <input
+              type="email"
+              className="input"
+              placeholder="john@example.com"
+              value={newUser.email}
+              onChange={(e) =>
+                setNewUser({ ...newUser, email: e.target.value })
+              }
+            />
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs font-semibold text-slate-600">
+              Password *
+            </label>
+            <input
+              type="password"
+              className="input"
+              placeholder="Password"
+              value={newUser.password}
+              onChange={(e) =>
+                setNewUser({ ...newUser, password: e.target.value })
+              }
+            />
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs font-semibold text-slate-600">
+              Role *
+            </label>
+            <select
+              className="select"
+              value={newUser.role}
+              onChange={(e) => setNewUser({ ...newUser, role: e.target.value })}
+            >
+              <option value="admin">Admin</option>
+              <option value="tenant_admin">Tenant Admin</option>
+              <option value="analyst">Analyst</option>
+            </select>
+          </div>
         </div>
+        <button
+          className="mt-4 flex items-center rounded-lg bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 disabled:opacity-50"
+          onClick={handleCreateUser}
+          disabled={loading}
+        >
+          <Plus className="mr-2 h-4 w-4" /> Add User
+        </button>
+      </div>
+
+      <div className="card overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm dark:bg-slate-900">
+        {usersError ? (
+          <div className="border-b border-red-100 bg-red-50 p-8 text-center text-red-600">
+            {usersError}
+          </div>
+        ) : (
+          <table className="w-full border-collapse text-left">
+            <thead>
+              <tr className="border-b border-slate-200 bg-slate-50">
+                <th className="p-4 text-sm font-medium text-slate-600">
+                  Email
+                </th>
+                <th className="p-4 text-sm font-medium text-slate-600">Name</th>
+                <th className="p-4 text-sm font-medium text-slate-600">Role</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {users.map((u, i) => (
+                <tr key={i}>
+                  <td className="p-4 font-medium text-slate-900">{u.email}</td>
+                  <td className="p-4 text-sm text-slate-600">{u.full_name}</td>
+                  <td className="p-4 text-sm text-slate-600">{u.role}</td>
+                </tr>
+              ))}
+              {users.length === 0 && (
+                <tr>
+                  <td colSpan={3} className="p-4 text-center text-slate-500">
+                    No users managed or unable to fetch.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        )}
       </div>
     </div>
   );
 
-  const renderPreferencesTab = () => (
+  const [siemTabState, setSiemTabState] = useState({
+    provider_name: "",
+    auth_type: "api_key",
+    credentials: "{}",
+    polling_interval: 5,
+    provider_config: "{}",
+  });
+
+  const handleCreateSiem = async () => {
+    if (!activeTenant) return toast.error("Select a tenant first");
+    try {
+      setLoading(true);
+      await tenantsApi.createSiem(activeTenant, {
+        tenant_id: activeTenant,
+        provider_name: siemTabState.provider_name,
+        auth_type: siemTabState.auth_type,
+        credentials: JSON.parse(siemTabState.credentials),
+        polling_interval: siemTabState.polling_interval,
+        provider_config: JSON.parse(siemTabState.provider_config),
+      });
+      toast.success("SIEM Integration configured successfully");
+    } catch (e: any) {
+      toast.error("Failed to configure SIEM: " + getErrorMessage(e, ""));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const renderSiemTab = () => (
     <div className="space-y-6">
-      <div className="card rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="max-w-3xl space-y-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-base text-slate-900">Dark mode</div>
-              <div className="text-sm text-slate-500">
-                Use dark theme for the interface
-              </div>
-            </div>
-            <div className="flex items-center space-x-3">
-              <label className="relative inline-flex cursor-pointer items-center">
-                <input
-                  type="checkbox"
-                  className="peer sr-only"
-                  checked={isDarkMode}
-                  onChange={toggleDarkMode}
-                />
-                <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#0078D4]"></div>
-              </label>
-              <span className="w-16 text-sm text-slate-700">
-                {isDarkMode ? "Enabled" : "Disabled"}
-              </span>
-            </div>
+      <div className="flex items-center gap-4 rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-900">
+        <span className="font-medium text-slate-700 dark:text-slate-300">
+          Target Tenant:
+        </span>
+        <select
+          className="input max-w-sm"
+          value={activeTenant || ""}
+          onChange={(e) => setActiveTenant(e.target.value)}
+        >
+          {tenants.map((t) => (
+            <option key={t.tenant_id || t.id} value={t.tenant_id || t.id}>
+              {t.tenant_name || t.client_name}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="card rounded-lg border border-slate-200 bg-white p-6 shadow-sm dark:bg-slate-900">
+        <h3 className="mb-4 text-lg font-medium text-slate-900">
+          Configure SIEM Integration
+        </h3>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <div className="space-y-1">
+            <label className="text-xs font-semibold text-slate-600">
+              Provider Name *
+            </label>
+            <input
+              className="input"
+              placeholder="e.g. elasticsearch"
+              value={siemTabState.provider_name}
+              onChange={(e) =>
+                setSiemTabState({
+                  ...siemTabState,
+                  provider_name: e.target.value,
+                })
+              }
+            />
           </div>
-
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-base text-slate-900">
-                Auto refresh Dashboard
-              </div>
-              <div className="text-sm text-slate-500">
-                Automatically refresh alert data every 30 seconds
-              </div>
-            </div>
-            <div className="flex items-center space-x-3">
-              <label className="relative inline-flex cursor-pointer items-center">
-                <input
-                  type="checkbox"
-                  className="peer sr-only"
-                  defaultChecked
-                />
-                <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#0078D4]"></div>
-              </label>
-              <span className="w-16 text-sm text-slate-700">Enabled</span>
-            </div>
+          <div className="space-y-1">
+            <label className="text-xs font-semibold text-slate-600">
+              Auth Type *
+            </label>
+            <select
+              className="select"
+              value={siemTabState.auth_type}
+              onChange={(e) =>
+                setSiemTabState({ ...siemTabState, auth_type: e.target.value })
+              }
+            >
+              <option value="api_key">API Key</option>
+              <option value="oauth2">OAuth 2.0</option>
+              <option value="basic">Basic</option>
+            </select>
           </div>
-
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-base text-slate-900">
-                Show resolved alerts
-              </div>
-              <div className="text-sm text-slate-500">
-                Display resolved alerts in the dashboard
-              </div>
-            </div>
-            <div className="flex items-center space-x-3">
-              <label className="relative inline-flex cursor-pointer items-center">
-                <input
-                  type="checkbox"
-                  className="peer sr-only"
-                  defaultChecked
-                />
-                <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#0078D4]"></div>
-              </label>
-              <span className="w-16 text-sm text-slate-700">Enabled</span>
-            </div>
+          <div className="space-y-1 md:col-span-2">
+            <label className="text-xs font-semibold text-slate-600">
+              Polling Interval (minutes) *
+            </label>
+            <input
+              type="number"
+              min="1"
+              max="360"
+              className="input"
+              placeholder="5"
+              value={siemTabState.polling_interval}
+              onChange={(e) =>
+                setSiemTabState({
+                  ...siemTabState,
+                  polling_interval: parseInt(e.target.value) || 5,
+                })
+              }
+            />
           </div>
-
-          <div className="flex items-center justify-between pt-2">
-            <div>
-              <div className="text-base text-slate-900">
-                Alert retention period
-              </div>
-              <div className="text-sm text-slate-500">
-                No of days to retain alert history
-              </div>
-            </div>
-            <div className="mr-3 flex items-center space-x-3">
-              <input
-                type="number"
-                defaultValue="20"
-                className="w-20 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
+          <div className="space-y-1 md:col-span-2">
+            <label className="text-xs font-semibold text-slate-600">
+              Credentials (JSON) *
+            </label>
+            <textarea
+              className="input h-24 font-mono text-xs"
+              placeholder='{"api_key": "..."}'
+              value={siemTabState.credentials}
+              onChange={(e) =>
+                setSiemTabState({
+                  ...siemTabState,
+                  credentials: e.target.value,
+                })
+              }
+            />
+          </div>
+          <div className="space-y-1 md:col-span-2">
+            <label className="text-xs font-semibold text-slate-600">
+              Provider Config (JSON)
+            </label>
+            <textarea
+              className="input h-24 font-mono text-xs"
+              placeholder='{"url": "..."}'
+              value={siemTabState.provider_config}
+              onChange={(e) =>
+                setSiemTabState({
+                  ...siemTabState,
+                  provider_config: e.target.value,
+                })
+              }
+            />
           </div>
         </div>
+        <button
+          className="mt-4 flex items-center rounded-lg bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 disabled:opacity-50"
+          onClick={handleCreateSiem}
+          disabled={loading}
+        >
+          <Plus className="mr-2 h-4 w-4" /> Save SIEM Config
+        </button>
       </div>
     </div>
   );
@@ -914,37 +1286,36 @@ export const SettingsPage: React.FC = () => {
         <nav className="flex gap-8">
           <button
             onClick={() => setActiveTab("tenants")}
-            className={`pb-3 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === "tenants" ? "border-blue-600 text-blue-600" : "border-transparent text-slate-600 hover:text-slate-900"}`}
+            className={`pb-3 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === "tenants" ? "border-blue-600 text-blue-600" : "border-transparent text-slate-600 hover:text-slate-900 dark:hover:text-slate-100"}`}
           >
             <Server className="mr-2 inline h-4 w-4 align-text-bottom" /> Tenants
           </button>
           <button
             onClick={() => setActiveTab("providers")}
-            className={`pb-3 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === "providers" ? "border-blue-600 text-blue-600" : "border-transparent text-slate-600 hover:text-slate-900"}`}
+            className={`pb-3 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === "providers" ? "border-blue-600 text-blue-600" : "border-transparent text-slate-600 hover:text-slate-900 dark:hover:text-slate-100"}`}
           >
             <Shield className="mr-2 inline h-4 w-4 align-text-bottom" />{" "}
             Providers
           </button>
           <button
             onClick={() => setActiveTab("integrations")}
-            className={`pb-3 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === "integrations" ? "border-blue-600 text-blue-600" : "border-transparent text-slate-600 hover:text-slate-900"}`}
+            className={`pb-3 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === "integrations" ? "border-blue-600 text-blue-600" : "border-transparent text-slate-600 hover:text-slate-900 dark:hover:text-slate-100"}`}
           >
             <Key className="mr-2 inline h-4 w-4 align-text-bottom" />{" "}
             Integrations
           </button>
           <button
-            onClick={() => setActiveTab("notifications")}
-            className={`pb-3 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === "notifications" ? "border-blue-600 text-blue-600" : "border-transparent text-slate-600 hover:text-slate-900"}`}
+            onClick={() => setActiveTab("users")}
+            className={`pb-3 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === "users" ? "border-blue-600 text-blue-600" : "border-transparent text-slate-600 hover:text-slate-900 dark:hover:text-slate-100"}`}
           >
-            <Bell className="mr-2 inline h-4 w-4 align-text-bottom" />{" "}
-            Notifications
+            <Shield className="mr-2 inline h-4 w-4 align-text-bottom" /> Users
           </button>
           <button
-            onClick={() => setActiveTab("preferences")}
-            className={`pb-3 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === "preferences" ? "border-blue-600 text-blue-600" : "border-transparent text-slate-600 hover:text-slate-900"}`}
+            onClick={() => setActiveTab("siem")}
+            className={`pb-3 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === "siem" ? "border-blue-600 text-blue-600" : "border-transparent text-slate-600 hover:text-slate-900 dark:hover:text-slate-100"}`}
           >
-            <Sliders className="mr-2 inline h-4 w-4 align-text-bottom" />{" "}
-            Preferences
+            <Settings className="mr-2 inline h-4 w-4 align-text-bottom" /> SIEM
+            Integration
           </button>
         </nav>
       </div>
@@ -953,8 +1324,8 @@ export const SettingsPage: React.FC = () => {
         {activeTab === "tenants" && renderTenantsTab()}
         {activeTab === "providers" && renderProvidersTab()}
         {activeTab === "integrations" && renderIntegrationsTab()}
-        {activeTab === "notifications" && renderNotificationsTab()}
-        {activeTab === "preferences" && renderPreferencesTab()}
+        {activeTab === "users" && renderUsersTab()}
+        {activeTab === "siem" && renderSiemTab()}
       </div>
     </div>
   );
