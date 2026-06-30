@@ -3,12 +3,10 @@ import {
   Plus,
   Trash2,
   Shield,
-  Settings,
   Server,
   Key,
   Bell,
   Sliders,
-  MoreVertical,
   Edit2,
 } from "lucide-react";
 import { useAuthStore } from "@/store/authStore";
@@ -26,7 +24,6 @@ type TabType =
   | "providers"
   | "integrations"
   | "users"
-  | "siem"
   | "preferences"
   | "notifications";
 
@@ -34,7 +31,7 @@ export const SettingsPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabType>("tenants");
   const [loading, setLoading] = useState(false);
 
-  const { user, activeTenant, setActiveTenant } = useAuthStore();
+  const { activeTenant, setActiveTenant } = useAuthStore();
   const [tenants, setTenants] = useState<any[]>([]);
   const [tenantsError, setTenantsError] = useState<string | null>(null);
   const [providers, setProviders] = useState<any[]>([]);
@@ -70,12 +67,6 @@ export const SettingsPage: React.FC = () => {
     description: "",
   });
   const [editingTenantId, setEditingTenantId] = useState<string | null>(null);
-  const [openTenantActionsMenuId, setOpenTenantActionsMenuId] = useState<
-    string | null
-  >(null);
-  const [openIntegrationMenuId, setOpenIntegrationMenuId] = useState<
-    string | null
-  >(null);
   const [newProvider, setNewProvider] = useState({
     provider_name: "",
     auth_method: "api_key",
@@ -85,6 +76,9 @@ export const SettingsPage: React.FC = () => {
     rate_limit_per_minute: "",
     supported_iocs: ["ip", "domain", "url", "hash"],
   });
+  const [editingProviderId, setEditingProviderId] = useState<
+    string | number | null
+  >(null);
 
   const [newIntegration, setNewIntegration] = useState({
     provider_id: "",
@@ -93,22 +87,11 @@ export const SettingsPage: React.FC = () => {
     priority: 1,
     quota_override: "",
   });
+  const [editingIntegrationId, setEditingIntegrationId] = useState<
+    string | null
+  >(null);
 
-  const [isDarkMode, setIsDarkMode] = useState(() =>
-    document.documentElement.classList.contains("dark")
-  );
-
-  const toggleDarkMode = () => {
-    const newVal = !isDarkMode;
-    setIsDarkMode(newVal);
-    if (newVal) {
-      document.documentElement.classList.add("dark");
-      localStorage.setItem("theme", "dark");
-    } else {
-      document.documentElement.classList.remove("dark");
-      localStorage.setItem("theme", "light");
-    }
-  };
+  // removed isDarkMode state
 
   const loadTenants = async () => {
     try {
@@ -247,15 +230,14 @@ export const SettingsPage: React.FC = () => {
       setEditingTenantId(null);
       loadTenants();
     } catch (e: any) {
-      const msg = getErrorMessage(
-        e,
-        `Failed to ${editingTenantId ? "update" : "create"} tenant`
-      );
-      toast.error(msg);
-      if (e?.response?.status === 403) {
-        toast.error(
-          "Access Denied: You do not have permissions to modify this tenant."
+      // apiClient already shows generic 403/401 errors, so we don't need to show them here again
+      // unless we want a specific message.
+      if (e?.response?.status !== 403 && e?.response?.status !== 401) {
+        const msg = getErrorMessage(
+          e,
+          `Failed to ${editingTenantId ? "update" : "create"} tenant`
         );
+        toast.error(msg);
       }
     } finally {
       setLoading(false);
@@ -269,7 +251,6 @@ export const SettingsPage: React.FC = () => {
       siem_tenant_id: t.siem_tenant_id || "",
       description: t.description || "",
     });
-    setOpenTenantActionsMenuId(null);
   };
 
   const handleDeleteTenant = async (id: string) => {
@@ -299,8 +280,8 @@ export const SettingsPage: React.FC = () => {
     setNewTenant({ tenant_name: "", siem_tenant_id: "", description: "" });
   };
 
-  const handleCreateProvider = async () => {
-    if (!newProvider.provider_name)
+  const handleCreateOrUpdateProvider = async () => {
+    if (!newProvider.provider_name && !editingProviderId)
       return toast.error("Provider Name is required.");
     try {
       const schema = JSON.parse(newProvider.auth_schema);
@@ -312,16 +293,23 @@ export const SettingsPage: React.FC = () => {
         : null;
 
       setLoading(true);
-      await providersApi.create({
-        provider_name: newProvider.provider_name,
+      const payload: any = {
         auth_method: newProvider.auth_method,
         auth_schema: schema,
         credential_example: credExample,
         supports_batching: newProvider.supports_batching,
         rate_limit_per_minute: rateLimit,
         supported_iocs: newProvider.supported_iocs,
-      });
-      toast.success("Provider created!");
+      };
+
+      if (editingProviderId) {
+        await providersApi.update(editingProviderId, payload);
+        toast.success("Provider updated!");
+      } else {
+        payload.provider_name = newProvider.provider_name;
+        await providersApi.create(payload);
+        toast.success("Provider created!");
+      }
       setNewProvider({
         provider_name: "",
         auth_method: "api_key",
@@ -331,6 +319,7 @@ export const SettingsPage: React.FC = () => {
         rate_limit_per_minute: "",
         supported_iocs: ["ip", "domain", "url", "hash"],
       });
+      setEditingProviderId(null);
       loadProviders();
     } catch (e: any) {
       toast.error("Invalid JSON or API error: " + getErrorMessage(e, ""));
@@ -339,8 +328,36 @@ export const SettingsPage: React.FC = () => {
     }
   };
 
-  const handleCreateIntegration = async () => {
-    if (!activeTenant || !newIntegration.provider_id)
+  const handleEditProviderClick = (p: any) => {
+    setEditingProviderId(p.id);
+    setNewProvider({
+      provider_name: p.provider_name || "",
+      auth_method: p.auth_method || "api_key",
+      auth_schema: p.auth_schema ? JSON.stringify(p.auth_schema) : "{}",
+      credential_example: p.credential_example
+        ? JSON.stringify(p.credential_example)
+        : "{}",
+      supports_batching: p.supports_batching || false,
+      rate_limit_per_minute: p.rate_limit_per_minute?.toString() || "",
+      supported_iocs: p.supported_iocs || [],
+    });
+  };
+
+  const handleCancelEditProvider = () => {
+    setEditingProviderId(null);
+    setNewProvider({
+      provider_name: "",
+      auth_method: "api_key",
+      auth_schema: "{}",
+      credential_example: "{}",
+      supports_batching: false,
+      rate_limit_per_minute: "",
+      supported_iocs: ["ip", "domain", "url", "hash"],
+    });
+  };
+
+  const handleCreateOrUpdateIntegration = async () => {
+    if (!activeTenant || (!newIntegration.provider_id && !editingIntegrationId))
       return toast.error("Select tenant and provider");
     try {
       const creds = JSON.parse(newIntegration.credentials);
@@ -354,14 +371,25 @@ export const SettingsPage: React.FC = () => {
         : null;
 
       setLoading(true);
-      await integrationsApi.create(activeTenant, {
-        provider_id: parseInt(newIntegration.provider_id, 10),
+      const payload: any = {
         credentials: creds,
         provider_config: config,
         priority: newIntegration.priority,
         ...(quota !== null && { quota_override: quota }),
-      });
-      toast.success("Integration created!");
+      };
+
+      if (editingIntegrationId) {
+        await integrationsApi.update(
+          activeTenant,
+          editingIntegrationId,
+          payload
+        );
+        toast.success("Integration updated!");
+      } else {
+        payload.provider_id = parseInt(newIntegration.provider_id, 10);
+        await integrationsApi.create(activeTenant, payload);
+        toast.success("Integration created!");
+      }
       setNewIntegration({
         provider_id: "",
         credentials: "{}",
@@ -369,12 +397,37 @@ export const SettingsPage: React.FC = () => {
         priority: 1,
         quota_override: "",
       });
+      setEditingIntegrationId(null);
       loadIntegrations();
     } catch (e: any) {
-      toast.error("Error creating integration: " + getErrorMessage(e, ""));
+      toast.error("Error saving integration: " + getErrorMessage(e, ""));
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleEditIntegrationClick = (i: any) => {
+    setEditingIntegrationId(i.id);
+    setNewIntegration({
+      provider_id: i.provider_id?.toString() || "",
+      credentials: "{}",
+      provider_config: i.provider_config
+        ? JSON.stringify(i.provider_config)
+        : "{}",
+      priority: i.priority || 1,
+      quota_override: i.quota_override?.toString() || "",
+    });
+  };
+
+  const handleCancelEditIntegration = () => {
+    setEditingIntegrationId(null);
+    setNewIntegration({
+      provider_id: "",
+      credentials: "{}",
+      provider_config: "{}",
+      priority: 1,
+      quota_override: "",
+    });
   };
 
   const handleDeleteIntegration = async (id: string) => {
@@ -488,80 +541,53 @@ export const SettingsPage: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {tenants.map((t) => {
-                const isMenuOpen =
-                  openTenantActionsMenuId === (t.tenant_id || t.id);
-                return (
-                  <tr key={t.tenant_id || t.id}>
-                    <td className="p-4 font-medium text-slate-900">
-                      {t.tenant_name || t.client_name}
-                    </td>
-                    <td className="p-4 text-slate-600 text-sm font-mono truncate max-w-[120px] sm:max-w-xs">
-                      {t.tenant_id || t.id}
-                    </td>
-                    <td className="p-4 text-sm text-slate-600 dark:text-slate-400">
-                      {t.is_active ? (
-                        <span className="inline-flex rounded-full bg-green-100 dark:bg-green-900/30 px-2 py-0.5 text-xs font-semibold text-green-800 dark:text-green-300">
-                          Active
-                        </span>
-                      ) : (
-                        <span className="inline-flex rounded-full bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-xs font-semibold text-slate-600 dark:text-slate-400">
-                          Inactive
-                        </span>
-                      )}
-                    </td>
-                    <td className="whitespace-nowrap p-4 text-sm text-slate-600 dark:text-slate-400">
-                      {t.created_at
-                        ? new Date(t.created_at).toLocaleString()
-                        : "-"}
-                    </td>
-                    <td className="whitespace-nowrap p-4 text-sm text-slate-600 dark:text-slate-400">
-                      {t.updated_at
-                        ? new Date(t.updated_at).toLocaleString()
-                        : "-"}
-                    </td>
-                    <td className="relative p-4 text-right">
-                      <>
-                        <button
-                          onClick={() =>
-                            setOpenTenantActionsMenuId(
-                              isMenuOpen ? null : t.tenant_id || t.id
-                            )
-                          }
-                          className="p-1.5 text-slate-400 hover:text-slate-600 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-                        >
-                          <MoreVertical className="h-5 w-5" />
-                        </button>
-                        {isMenuOpen && (
-                          <>
-                            <div
-                              className="fixed inset-0 z-10"
-                              onClick={() => setOpenTenantActionsMenuId(null)}
-                            />
-                            <div className="absolute right-4 z-20 mt-2 w-32 rounded-lg border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-700 dark:bg-slate-800">
-                              <button
-                                className="flex w-full items-center px-4 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-700"
-                                onClick={() => handleEditTenantClick(t)}
-                              >
-                                <Edit2 className="mr-2 h-4 w-4" /> Edit
-                              </button>
-                              <button
-                                className="flex w-full items-center px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
-                                onClick={() => {
-                                  setOpenTenantActionsMenuId(null);
-                                  handleDeleteTenant(t.tenant_id || t.id);
-                                }}
-                              >
-                                <Trash2 className="mr-2 h-4 w-4" /> Delete
-                              </button>
-                            </div>
-                          </>
-                        )}
-                      </>
-                    </td>
-                  </tr>
-                );
-              })}
+              {tenants.map((t) => (
+                <tr key={t.tenant_id || t.id}>
+                  <td className="p-4 font-medium text-slate-900">
+                    {t.tenant_name || t.client_name}
+                  </td>
+                  <td className="p-4 text-slate-600 text-sm font-mono truncate max-w-[120px] sm:max-w-xs">
+                    {t.tenant_id || t.id}
+                  </td>
+                  <td className="p-4 text-sm text-slate-600 dark:text-slate-400">
+                    {t.is_active ? (
+                      <span className="inline-flex rounded-full bg-green-100 dark:bg-green-900/30 px-2 py-0.5 text-xs font-semibold text-green-800 dark:text-green-300">
+                        Active
+                      </span>
+                    ) : (
+                      <span className="inline-flex rounded-full bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-xs font-semibold text-slate-600 dark:text-slate-400">
+                        Inactive
+                      </span>
+                    )}
+                  </td>
+                  <td className="whitespace-nowrap p-4 text-sm text-slate-600 dark:text-slate-400">
+                    {t.created_at
+                      ? new Date(t.created_at).toLocaleString()
+                      : "-"}
+                  </td>
+                  <td className="whitespace-nowrap p-4 text-sm text-slate-600 dark:text-slate-400">
+                    {t.updated_at
+                      ? new Date(t.updated_at).toLocaleString()
+                      : "-"}
+                  </td>
+                  <td className="p-4 text-right">
+                    <button
+                      onClick={() => handleEditTenantClick(t)}
+                      className="mr-2 p-1 text-slate-500 hover:text-blue-600"
+                      title="Edit"
+                    >
+                      <Edit2 className="h-4 w-4" />
+                    </button>
+                    <button
+                      onClick={() => handleDeleteTenant(t.tenant_id || t.id)}
+                      className="p-1 text-slate-500 hover:text-red-600"
+                      title="Delete"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </td>
+                </tr>
+              ))}
               {tenants.length === 0 && (
                 <tr>
                   <td colSpan={6} className="p-4 text-center text-slate-500">
@@ -712,13 +738,32 @@ export const SettingsPage: React.FC = () => {
             />
           </div>
         </div>
-        <button
-          className="mt-4 flex items-center rounded-lg bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 disabled:opacity-50"
-          onClick={handleCreateProvider}
-          disabled={loading}
-        >
-          <Plus className="mr-2 h-4 w-4" /> Add Provider
-        </button>
+        <div className="flex gap-2">
+          <button
+            className="mt-4 flex items-center rounded-lg bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 disabled:opacity-50"
+            onClick={handleCreateOrUpdateProvider}
+            disabled={loading}
+          >
+            {editingProviderId ? (
+              <>
+                <Edit2 className="mr-2 h-4 w-4" /> Update Provider
+              </>
+            ) : (
+              <>
+                <Plus className="mr-2 h-4 w-4" /> Add Provider
+              </>
+            )}
+          </button>
+          {editingProviderId && (
+            <button
+              className="mt-4 flex items-center rounded-lg bg-slate-100 px-4 py-2 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300"
+              onClick={handleCancelEditProvider}
+              disabled={loading}
+            >
+              Cancel
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="card overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm dark:bg-slate-900">
@@ -779,6 +824,12 @@ export const SettingsPage: React.FC = () => {
                     {p.auth_method}
                   </td>
                   <td className="p-4 text-right">
+                    <button
+                      onClick={() => handleEditProviderClick(p)}
+                      className="mr-2 p-1 text-slate-500 hover:text-slate-700"
+                    >
+                      <Edit2 className="h-4 w-4" />
+                    </button>
                     <button
                       onClick={async () => {
                         if (!confirm("Are you sure?")) return;
@@ -929,22 +980,41 @@ export const SettingsPage: React.FC = () => {
             />
           </div>
         </div>
-        <button
-          className="mt-4 flex items-center rounded-lg bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 disabled:opacity-50"
-          onClick={handleCreateIntegration}
-          disabled={loading}
-        >
-          <Plus className="mr-2 h-4 w-4" /> Activate Integration
-        </button>
+        <div className="flex gap-2">
+          <button
+            className="mt-4 flex items-center rounded-lg bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 disabled:opacity-50"
+            onClick={handleCreateOrUpdateIntegration}
+            disabled={loading}
+          >
+            {editingIntegrationId ? (
+              <>
+                <Edit2 className="mr-2 h-4 w-4" /> Update Integration
+              </>
+            ) : (
+              <>
+                <Plus className="mr-2 h-4 w-4" /> Activate Integration
+              </>
+            )}
+          </button>
+          {editingIntegrationId && (
+            <button
+              className="mt-4 flex items-center rounded-lg bg-slate-100 px-4 py-2 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300"
+              onClick={handleCancelEditIntegration}
+              disabled={loading}
+            >
+              Cancel
+            </button>
+          )}
+        </div>
       </div>
 
-      <div className="card overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm dark:bg-slate-900">
+      <div className="card overflow-visible rounded-lg border border-slate-200 bg-white shadow-sm dark:bg-slate-900">
         {integrationsError ? (
           <div className="border-b border-red-100 bg-red-50 p-8 text-center text-red-600">
             {integrationsError}
           </div>
         ) : (
-          <table className="w-full border-collapse text-left">
+          <table className="w-full border-collapse overflow-visible text-left">
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50">
                 <th className="p-4 text-sm font-medium text-slate-600">
@@ -965,83 +1035,65 @@ export const SettingsPage: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {integrations.map((p) => {
-                const isMenuOpen = openIntegrationMenuId === p.id;
-                return (
-                  <tr key={p.id}>
-                    <td className="p-4 font-mono text-sm text-slate-600">
-                      {p.id}
-                    </td>
-                    <td className="p-4 font-medium text-slate-900">
-                      {providers.find((prov) => prov.id === p.provider_id)
-                        ?.provider_name || `Provider #${p.provider_id}`}
-                    </td>
-                    <td className="p-4 text-center text-sm text-slate-600">
-                      <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-slate-100 font-medium">
-                        {p.priority || 1}
-                      </span>
-                    </td>
-                    <td className="p-4 text-sm text-slate-600">
-                      <span
-                        className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${p.is_active ? "bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300" : "bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-400"}`}
-                      >
-                        {p.is_active ? "Active" : "Inactive"}
-                      </span>
-                    </td>
-                    <td className="relative p-4 text-right">
-                      <button
-                        onClick={() =>
-                          setOpenIntegrationMenuId(isMenuOpen ? null : p.id)
+              {integrations.map((p) => (
+                <tr key={p.id}>
+                  <td className="p-4 font-mono text-sm text-slate-600">
+                    {p.id}
+                  </td>
+                  <td className="p-4 font-medium text-slate-900">
+                    {providers.find((prov) => prov.id === p.provider_id)
+                      ?.provider_name || `Provider #${p.provider_id}`}
+                  </td>
+                  <td className="p-4 text-center text-sm text-slate-600">
+                    <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-slate-100 font-medium">
+                      {p.priority || 1}
+                    </span>
+                  </td>
+                  <td className="p-4 text-sm text-slate-600">
+                    <span
+                      className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${p.is_active ? "bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300" : "bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-400"}`}
+                    >
+                      {p.is_active ? "Active" : "Inactive"}
+                    </span>
+                  </td>
+                  <td className="flex justify-end p-4 text-right">
+                    <button
+                      onClick={async () => {
+                        if (!activeTenant) return;
+                        try {
+                          await integrationsApi.update(activeTenant, p.id, {
+                            is_active: !p.is_active,
+                          });
+                          toast.success(
+                            `Integration ${p.is_active ? "deactivated" : "activated"}`
+                          );
+                          loadIntegrations();
+                        } catch (e) {
+                          toast.error("Failed to toggle status");
                         }
-                        className="p-1.5 text-slate-400 hover:text-slate-600 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-                      >
-                        <MoreVertical className="h-5 w-5" />
-                      </button>
-                      {isMenuOpen && (
-                        <>
-                          <div
-                            className="fixed inset-0 z-10"
-                            onClick={() => setOpenIntegrationMenuId(null)}
-                          />
-                          <div className="absolute right-4 z-20 mt-2 w-36 rounded-lg border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-700 dark:bg-slate-800">
-                            <button
-                              className="flex w-full items-center px-4 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-700"
-                              onClick={async () => {
-                                if (!activeTenant) return;
-                                try {
-                                  setOpenIntegrationMenuId(null);
-                                  await integrationsApi.update(
-                                    activeTenant,
-                                    p.id,
-                                    { is_active: !p.is_active }
-                                  );
-                                  toast.success(
-                                    `Integration ${p.is_active ? "deactivated" : "activated"}`
-                                  );
-                                  loadIntegrations();
-                                } catch (e) {
-                                  toast.error("Failed to toggle status");
-                                }
-                              }}
-                            >
-                              {p.is_active ? "Deactivate" : "Activate"}
-                            </button>
-                            <button
-                              className="flex w-full items-center px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
-                              onClick={() => {
-                                setOpenIntegrationMenuId(null);
-                                handleDeleteIntegration(p.id);
-                              }}
-                            >
-                              <Trash2 className="mr-2 h-4 w-4" /> Delete
-                            </button>
-                          </div>
-                        </>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
+                      }}
+                      className="mr-2 p-1 text-slate-500 hover:text-green-600"
+                      title={p.is_active ? "Deactivate" : "Activate"}
+                    >
+                      <Server className="h-4 w-4" />
+                    </button>
+                    <button
+                      onClick={() => handleEditIntegrationClick(p)}
+                      className="mr-2 p-1 text-slate-500 hover:text-blue-600"
+                      title="Edit"
+                    >
+                      <Edit2 className="h-4 w-4" />
+                    </button>
+                    <button
+                      onClick={() => handleDeleteIntegration(p.id)}
+                      className="p-1 text-slate-500 hover:text-red-600"
+                      title="Delete"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </td>
+                </tr>
+              ))}
               {integrations.length === 0 && (
                 <tr>
                   <td colSpan={5} className="p-4 text-center text-slate-500">
@@ -1052,6 +1104,104 @@ export const SettingsPage: React.FC = () => {
             </tbody>
           </table>
         )}
+      </div>
+
+      <div className="card rounded-lg border border-slate-200 bg-white p-6 shadow-sm dark:bg-slate-900">
+        <h3 className="mb-4 text-lg font-medium text-slate-900">
+          Configure SIEM Integration
+        </h3>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <div className="space-y-1">
+            <label className="text-xs font-semibold text-slate-600">
+              Provider Name *
+            </label>
+            <input
+              className="input"
+              placeholder="e.g. elasticsearch"
+              value={siemTabState.provider_name}
+              onChange={(e) =>
+                setSiemTabState({
+                  ...siemTabState,
+                  provider_name: e.target.value,
+                })
+              }
+            />
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs font-semibold text-slate-600">
+              Auth Type *
+            </label>
+            <select
+              className="select"
+              value={siemTabState.auth_type}
+              onChange={(e) =>
+                setSiemTabState({ ...siemTabState, auth_type: e.target.value })
+              }
+            >
+              <option value="api_key">API Key</option>
+              <option value="oauth2">OAuth 2.0</option>
+              <option value="basic">Basic</option>
+            </select>
+          </div>
+          <div className="space-y-1 md:col-span-2">
+            <label className="text-xs font-semibold text-slate-600">
+              Polling Interval (minutes) *
+            </label>
+            <input
+              type="number"
+              min="1"
+              max="360"
+              className="input"
+              placeholder="5"
+              value={siemTabState.polling_interval}
+              onChange={(e) =>
+                setSiemTabState({
+                  ...siemTabState,
+                  polling_interval: parseInt(e.target.value) || 5,
+                })
+              }
+            />
+          </div>
+          <div className="space-y-1 md:col-span-2">
+            <label className="text-xs font-semibold text-slate-600">
+              Credentials (JSON) *
+            </label>
+            <textarea
+              className="input h-24 font-mono text-xs"
+              placeholder='{"api_key": "..."}'
+              value={siemTabState.credentials}
+              onChange={(e) =>
+                setSiemTabState({
+                  ...siemTabState,
+                  credentials: e.target.value,
+                })
+              }
+            />
+          </div>
+          <div className="space-y-1 md:col-span-2">
+            <label className="text-xs font-semibold text-slate-600">
+              Provider Config (JSON)
+            </label>
+            <textarea
+              className="input h-24 font-mono text-xs"
+              placeholder='{"url": "..."}'
+              value={siemTabState.provider_config}
+              onChange={(e) =>
+                setSiemTabState({
+                  ...siemTabState,
+                  provider_config: e.target.value,
+                })
+              }
+            />
+          </div>
+        </div>
+        <button
+          className="mt-4 flex items-center rounded-lg bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 disabled:opacity-50"
+          onClick={handleCreateSiem}
+          disabled={loading}
+        >
+          <Plus className="mr-2 h-4 w-4" /> Save SIEM Config
+        </button>
       </div>
     </div>
   );
@@ -1209,124 +1359,6 @@ export const SettingsPage: React.FC = () => {
     }
   };
 
-  const renderSiemTab = () => (
-    <div className="space-y-6">
-      <div className="flex items-center gap-4 rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-900">
-        <span className="font-medium text-slate-700 dark:text-slate-300">
-          Target Tenant:
-        </span>
-        <select
-          className="input max-w-sm"
-          value={activeTenant || ""}
-          onChange={(e) => setActiveTenant(e.target.value)}
-        >
-          {tenants.map((t) => (
-            <option key={t.tenant_id || t.id} value={t.tenant_id || t.id}>
-              {t.tenant_name || t.client_name}
-            </option>
-          ))}
-        </select>
-      </div>
-      <div className="card rounded-lg border border-slate-200 bg-white p-6 shadow-sm dark:bg-slate-900">
-        <h3 className="mb-4 text-lg font-medium text-slate-900">
-          Configure SIEM Integration
-        </h3>
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <div className="space-y-1">
-            <label className="text-xs font-semibold text-slate-600">
-              Provider Name *
-            </label>
-            <input
-              className="input"
-              placeholder="e.g. elasticsearch"
-              value={siemTabState.provider_name}
-              onChange={(e) =>
-                setSiemTabState({
-                  ...siemTabState,
-                  provider_name: e.target.value,
-                })
-              }
-            />
-          </div>
-          <div className="space-y-1">
-            <label className="text-xs font-semibold text-slate-600">
-              Auth Type *
-            </label>
-            <select
-              className="select"
-              value={siemTabState.auth_type}
-              onChange={(e) =>
-                setSiemTabState({ ...siemTabState, auth_type: e.target.value })
-              }
-            >
-              <option value="api_key">API Key</option>
-              <option value="oauth2">OAuth 2.0</option>
-              <option value="basic">Basic</option>
-            </select>
-          </div>
-          <div className="space-y-1 md:col-span-2">
-            <label className="text-xs font-semibold text-slate-600">
-              Polling Interval (minutes) *
-            </label>
-            <input
-              type="number"
-              min="1"
-              max="360"
-              className="input"
-              placeholder="5"
-              value={siemTabState.polling_interval}
-              onChange={(e) =>
-                setSiemTabState({
-                  ...siemTabState,
-                  polling_interval: parseInt(e.target.value) || 5,
-                })
-              }
-            />
-          </div>
-          <div className="space-y-1 md:col-span-2">
-            <label className="text-xs font-semibold text-slate-600">
-              Credentials (JSON) *
-            </label>
-            <textarea
-              className="input h-24 font-mono text-xs"
-              placeholder='{"api_key": "..."}'
-              value={siemTabState.credentials}
-              onChange={(e) =>
-                setSiemTabState({
-                  ...siemTabState,
-                  credentials: e.target.value,
-                })
-              }
-            />
-          </div>
-          <div className="space-y-1 md:col-span-2">
-            <label className="text-xs font-semibold text-slate-600">
-              Provider Config (JSON)
-            </label>
-            <textarea
-              className="input h-24 font-mono text-xs"
-              placeholder='{"url": "..."}'
-              value={siemTabState.provider_config}
-              onChange={(e) =>
-                setSiemTabState({
-                  ...siemTabState,
-                  provider_config: e.target.value,
-                })
-              }
-            />
-          </div>
-        </div>
-        <button
-          className="mt-4 flex items-center rounded-lg bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 disabled:opacity-50"
-          onClick={handleCreateSiem}
-          disabled={loading}
-        >
-          <Plus className="mr-2 h-4 w-4" /> Save SIEM Config
-        </button>
-      </div>
-    </div>
-  );
-
   return (
     <div className="space-y-6">
       <div>
@@ -1367,13 +1399,6 @@ export const SettingsPage: React.FC = () => {
             <Shield className="mr-2 inline h-4 w-4 align-text-bottom" /> Users
           </button>
           <button
-            onClick={() => setActiveTab("siem")}
-            className={`pb-3 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === "siem" ? "border-blue-600 text-blue-600" : "border-transparent text-slate-600 hover:text-slate-900 dark:hover:text-slate-100"}`}
-          >
-            <Settings className="mr-2 inline h-4 w-4 align-text-bottom" /> SIEM
-            Integration
-          </button>
-          <button
             onClick={() => setActiveTab("preferences")}
             className={`pb-3 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === "preferences" ? "border-blue-600 text-blue-600" : "border-transparent text-slate-600 hover:text-slate-900 dark:hover:text-slate-100"}`}
           >
@@ -1395,7 +1420,6 @@ export const SettingsPage: React.FC = () => {
         {activeTab === "providers" && renderProvidersTab()}
         {activeTab === "integrations" && renderIntegrationsTab()}
         {activeTab === "users" && renderUsersTab()}
-        {activeTab === "siem" && renderSiemTab()}
         {activeTab === "preferences" && (
           <div className="card divide-y divide-slate-100 rounded-lg border border-slate-200 bg-white shadow-sm dark:divide-slate-800 dark:bg-slate-900">
             <div className="p-6">
